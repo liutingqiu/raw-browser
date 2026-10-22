@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px system-ui, sans-serif; margin: 12px; min-width: 240px; color: #1f2328; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    #status { font-weight: 600; margin: 0 0 4px; }
+    #detail { color: #59636e; margin: 0 0 10px; white-space: pre-wrap; }
+    button { font: inherit; padding: 5px 10px; border: 1px solid #b7bdc7; border-radius: 6px; background: #f6f8fa; cursor: pointer; }
+    button:hover { background: #eef1f4; }
+  </style>
+</head>
+<body>
+  <h1>Raw Browser Bridge</h1>
+  <p id="status">Checking…</p>
+  <p id="detail"></p>
+  <button id="toggle" type="button">Disconnect</button>
+  <script src="popup.js"></script>
+</body>
+</html>

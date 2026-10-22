@@ -22,6 +22,11 @@ Browser- and Target-domain commands are routed through extension APIs when a
 tab-scoped `chrome.debugger` session cannot perform them directly. The user's
 prompt and permission mode govern which actions an agent may take.
 
+The toolbar popup reports whether the native host is connected, its extension
+version and the browser user agent, and offers a **Disconnect** switch. While
+paused, the extension keeps no native port and cannot be driven remotely;
+**Reconnect** resumes it.
+
 ## Install
 
 ```powershell

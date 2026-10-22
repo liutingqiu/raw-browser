@@ -19,6 +19,7 @@
     "proxy",
     "scripting",
     "sessions",
+    "storage",
     "tabs",
     "webNavigation"
   ],
@@ -29,7 +30,8 @@
     "service_worker": "service-worker.js"
   },
   "action": {
-    "default_title": "Raw Edge Bridge"
+    "default_title": "Raw Browser Bridge",
+    "default_popup": "popup.html"
   },
   "icons": {
     "16": "icons/icon16.png",

@@ -18,6 +18,9 @@ follow Semantic Versioning.
 - `mcp/raw-browser-mcp.mjs`: a persistent MCP server with current-tab tracking,
   `raw_use` browser switching, image results for screenshots, cancellation and
   output caps.
+- The extension toolbar popup reports bridge status and offers a Disconnect /
+  Reconnect switch, backed by `chrome.storage` so the pause survives a service
+  worker restart.
 - `page.axSnapshot()` exposes the accessibility tree alongside the existing
   interactive-element snapshot.
 - Shadow-DOM traversal in locators, snapshots and click/fill.

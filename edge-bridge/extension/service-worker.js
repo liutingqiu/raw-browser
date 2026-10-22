@@ -5,6 +5,7 @@ importScripts("bridge-core.js");
 let nativePort;
 let reconnectTimer;
 let reconnectDelay = 1000;
+let paused = false;
 const bridge = RawEdgeBridgeCore.createBridgeExecutor(chrome);
 
 /**
@@ -38,7 +39,7 @@ function dropPort(port) {
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return;
+  if (paused || reconnectTimer) return;
   const delay = reconnectDelay;
   // Exponential backoff: a missing or crashing host used to be relaunched
   // once per second forever.
@@ -50,7 +51,7 @@ function scheduleReconnect() {
 }
 
 function connect() {
-  if (nativePort) return;
+  if (paused || nativePort) return;
   clearTimeout(reconnectTimer);
   reconnectTimer = undefined;
   let port;
@@ -233,6 +234,39 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   });
 });
 
-chrome.runtime.onInstalled.addListener(connect);
-chrome.runtime.onStartup.addListener(connect);
-connect();
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "raw-status") {
+    sendResponse({
+      connected: Boolean(nativePort),
+      paused,
+      version: chrome.runtime.getManifest().version,
+      protocolVersion: "1",
+      browser: navigator.userAgent,
+    });
+    return;
+  }
+  if (message?.type === "raw-disconnect") {
+    paused = true;
+    chrome.storage.local.set({ paused: true });
+    if (nativePort) dropPort(nativePort);
+    sendResponse({ ok: true, paused });
+    return;
+  }
+  if (message?.type === "raw-reconnect") {
+    paused = false;
+    chrome.storage.local.set({ paused: false });
+    connect();
+    sendResponse({ ok: true, paused });
+  }
+});
+
+function bootstrap() {
+  chrome.storage.local.get({ paused: false }, (state) => {
+    paused = state.paused === true;
+    if (!paused) connect();
+  });
+}
+
+chrome.runtime.onInstalled.addListener(bootstrap);
+chrome.runtime.onStartup.addListener(bootstrap);
+bootstrap();
