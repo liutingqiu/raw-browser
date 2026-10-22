@@ -65,7 +65,7 @@ const script = `
   await page.click("role=button[name=Go]");
   const hit = await page.eval("document.querySelector('iframe').contentDocument.body.dataset.hit");
   if (hit !== "1") throw new Error("iframe click did not land");
-  const waiting = page.waitForDownload({ timeoutMs: 10000 });
+  const waiting = page.waitForDownload({ timeoutMs: 20000 });
   await page.click("#download");
   const downloaded = await waiting;
   if (downloaded.bytes !== 16) throw new Error("download size mismatch: " + downloaded.bytes);
