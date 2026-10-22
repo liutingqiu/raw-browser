@@ -19,17 +19,26 @@ export type ImagePart = { mime: string; data: string };
 
 const EXTERNAL_BRIDGE = process.env.RAW_BROWSER_EXTERNAL_BRIDGE === "1";
 
+/** `edge` (default) or `chrome`; selects the bridge config and default port. */
+export const BRIDGE_BROWSER = (process.env.RAW_BROWSER_BRIDGE_BROWSER ?? "edge").toLowerCase() === "chrome"
+  ? "chrome"
+  : "edge";
+const BRIDGE_CONFIG_FILE = BRIDGE_BROWSER === "chrome" ? "chrome-bridge.json" : "edge-bridge.json";
+
 /**
- * The installer writes {version, token, port} to ~/.raw/edge-bridge.json, and
- * the bridge host rejects unauthenticated requests. Reading that file here is
- * what makes extension mode work from a single environment variable, instead
- * of making the user copy the token across by hand.
+ * The installer writes {version, token, port} to ~/.raw/{edge,chrome}-bridge.json,
+ * and the bridge host rejects unauthenticated requests. Reading that file here is
+ * what makes extension mode work from a single environment variable, instead of
+ * making the user copy the token across by hand.
  */
-export function readBridgeConfig(configDir: string): { token?: string; port?: number } {
+export function readBridgeConfig(
+  configDir: string,
+  file: string = BRIDGE_CONFIG_FILE,
+): { token?: string; port?: number } {
   try {
-    const parsed = JSON.parse(
-      fs.readFileSync(path.join(configDir, "edge-bridge.json"), "utf8"),
-    ) as { token?: unknown; port?: unknown };
+    const filePath = path.isAbsolute(file) ? file : path.join(configDir, file);
+    const raw = fs.readFileSync(filePath, "utf8").replace(/^﻿/, "");
+    const parsed = JSON.parse(raw) as { token?: unknown; port?: unknown };
     return {
       token: typeof parsed.token === "string" && parsed.token.length > 0 ? parsed.token : undefined,
       port: typeof parsed.port === "number" && Number.isInteger(parsed.port) ? parsed.port : undefined,
@@ -39,10 +48,12 @@ export function readBridgeConfig(configDir: string): { token?: string; port?: nu
   }
 }
 
-const BRIDGE_CONFIG = EXTERNAL_BRIDGE ? readBridgeConfig(CONFIG_DIR) : {};
+const BRIDGE_CONFIG = EXTERNAL_BRIDGE
+  ? readBridgeConfig(CONFIG_DIR, process.env.RAW_BRIDGE_CONFIG || BRIDGE_CONFIG_FILE)
+  : {};
 const BRIDGE_TOKEN = process.env.RAW_BROWSER_BRIDGE_TOKEN ?? BRIDGE_CONFIG.token;
-/** edge-bridge/host/Program.cs binds this fixed port in extension mode */
-const BRIDGE_PORT = BRIDGE_CONFIG.port ?? 9333;
+/** The native host binds this fixed port in extension mode. */
+const BRIDGE_PORT = BRIDGE_CONFIG.port ?? (BRIDGE_BROWSER === "chrome" ? 9334 : 9333);
 const configuredPort = process.env.RAW_BROWSER_PORT;
 const PORT = configuredPort === undefined ? (EXTERNAL_BRIDGE ? BRIDGE_PORT : 9222) : Number(configuredPort);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
@@ -87,7 +98,17 @@ class Cdp {
         else p.resolve(msg.result);
         return;
       }
-      if (msg.method) for (const cb of this.listeners.get(msg.method) ?? []) cb(msg.params);
+      if (msg.method) {
+        for (const cb of this.listeners.get(msg.method) ?? []) {
+          // A user-supplied predicate must never take down the transport:
+          // one throwing listener would otherwise skip every later listener.
+          try {
+            cb(msg.params);
+          } catch {
+            /* listener errors are the caller's problem, not the socket's */
+          }
+        }
+      }
     });
     ws.addEventListener("close", () => this.markClosed());
     ws.addEventListener("error", () => this.markClosed());
@@ -183,22 +204,37 @@ class Cdp {
  * browser discovery + launch
  * ------------------------------------------------------------------ */
 
-const CANDIDATES = [
+const CHROME_CANDIDATES = [
   process.env.RAW_BROWSER_PATH,
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
   path.join(os.homedir(), "AppData", "Local", "Google", "Chrome", "Application", "chrome.exe"),
-  path.join(os.homedir(), "AppData", "Local", "Microsoft", "Edge", "Application", "msedge.exe"),
-  "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 ].filter(Boolean) as string[];
 
-function findBrowser(): string | null {
-  for (const c of CANDIDATES) {
+const EDGE_CANDIDATES = [
+  process.env.RAW_BROWSER_PATH,
+  path.join(os.homedir(), "AppData", "Local", "Microsoft", "Edge", "Application", "msedge.exe"),
+  "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "/usr/bin/microsoft-edge",
+  "/usr/bin/microsoft-edge-stable",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+].filter(Boolean) as string[];
+
+export type BrowserKind = "edge" | "chrome" | "auto";
+
+function findBrowser(preferred: BrowserKind = EXTERNAL_BRIDGE ? BRIDGE_BROWSER : "auto"): string | null {
+  const candidates = preferred === "chrome"
+    ? CHROME_CANDIDATES
+    : preferred === "edge"
+      ? EDGE_CANDIDATES
+      : [...CHROME_CANDIDATES, ...EDGE_CANDIDATES];
+  for (const c of candidates) {
     try {
       if (fs.statSync(c).isFile()) return c;
     } catch {
@@ -206,6 +242,18 @@ function findBrowser(): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Bare host names get https; anything with a scheme is left alone. The old
+ * unconditional prefix turned file://, data:, about: and edge:// into
+ * https://file:///... and friends.
+ */
+export function normalizeUrl(url: string): string {
+  const value = String(url ?? "").trim();
+  if (!value) return "about:blank";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+  return `https://${value}`;
 }
 
 type DebuggerInfo = { Browser?: string; webSocketDebuggerUrl?: string };
@@ -224,11 +272,16 @@ async function debuggerAlive(): Promise<DebuggerInfo | null> {
 
 async function launchBrowser(): Promise<void> {
   const exe = findBrowser();
-  if (!exe) throw new Error("no Chrome/Edge found. Set RAW_BROWSER_PATH to the executable.");
+  if (!exe) {
+    const wanted = EXTERNAL_BRIDGE ? BRIDGE_BROWSER : "Chrome/Edge";
+    throw new Error(`no ${wanted} executable found. Set RAW_BROWSER_PATH to the executable.`);
+  }
 
   if (!EXTERNAL_BRIDGE) ensureDir(PROFILE);
   const args = EXTERNAL_BRIDGE
-    ? ["--profile-directory=Default", "about:blank"]
+    // No URL: spawning against an already-running profile used to leave an
+    // extra about:blank tab behind on every run.
+    ? ["--profile-directory=Default"]
     : [
         `--remote-debugging-port=${PORT}`,
         `--user-data-dir=${PROFILE}`,
@@ -260,11 +313,18 @@ async function launchBrowser(): Promise<void> {
       return;
     }
   }
-  throw new Error(`browser did not expose a debugger on port ${PORT} within 30s`);
+  throw new Error(
+    EXTERNAL_BRIDGE
+      ? `${BRIDGE_BROWSER} did not expose the Raw bridge on port ${PORT} within 30s. Check that the Raw Browser Bridge extension is loaded in that browser and the native host is installed.`
+      : `browser did not expose a debugger on port ${PORT} within 30s`,
+  );
 }
 
 function ownsDefaultDebugger(info: DebuggerInfo): boolean {
-  if (EXTERNAL_BRIDGE) return info.Browser?.startsWith("RawEdgeBridge/") === true;
+  if (EXTERNAL_BRIDGE) {
+    const prefix = BRIDGE_BROWSER === "chrome" ? "RawChromeBridge/" : "RawEdgeBridge/";
+    return info.Browser?.startsWith(prefix) === true;
+  }
   if (process.env.RAW_BROWSER_PORT) return true;
   try {
     const marker = JSON.parse(fs.readFileSync(BROWSER_MARKER, "utf8"));
@@ -398,9 +458,11 @@ async function targetHttpAction(action: "activate" | "close", targetId: string):
 }
 
 async function enableDomains(cdp: Cdp) {
+  // Network is enabled lazily: its events are high-volume and every one of
+  // them crosses the native bridge twice. Only waitForResponse/networkidle
+  // need it.
   await cdp.send("Page.enable", {}, 5000);
   await cdp.send("Runtime.enable", {}, 5000);
-  await cdp.send("Network.enable", {}, 5000);
 }
 
 async function attachPage(wsUrl: string): Promise<{ cdp: Cdp; page: PageHandle }> {
@@ -597,39 +659,184 @@ const INSTALL = fs.readFileSync(new URL("./page-helpers.js", import.meta.url), "
  * key / mouse helpers
  * ------------------------------------------------------------------ */
 
-const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
-  Enter: { code: "Enter", keyCode: 13, text: "\r" },
-  Tab: { code: "Tab", keyCode: 9 },
-  Escape: { code: "Escape", keyCode: 27 },
-  Backspace: { code: "Backspace", keyCode: 8 },
-  Delete: { code: "Delete", keyCode: 46 },
-  ArrowUp: { code: "ArrowUp", keyCode: 38 },
-  ArrowDown: { code: "ArrowDown", keyCode: 40 },
-  ArrowLeft: { code: "ArrowLeft", keyCode: 37 },
-  ArrowRight: { code: "ArrowRight", keyCode: 39 },
-  Space: { code: "Space", keyCode: 32, text: " " },
-  PageDown: { code: "PageDown", keyCode: 34 },
-  PageUp: { code: "PageUp", keyCode: 33 },
-  Home: { code: "Home", keyCode: 36 },
-  End: { code: "End", keyCode: 35 },
+type KeySpec = { key: string; code: string; keyCode: number; text?: string };
+
+const NAMED_KEYS: Record<string, KeySpec> = {
+  enter: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
+  return: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
+  tab: { key: "Tab", code: "Tab", keyCode: 9 },
+  escape: { key: "Escape", code: "Escape", keyCode: 27 },
+  esc: { key: "Escape", code: "Escape", keyCode: 27 },
+  backspace: { key: "Backspace", code: "Backspace", keyCode: 8 },
+  delete: { key: "Delete", code: "Delete", keyCode: 46 },
+  del: { key: "Delete", code: "Delete", keyCode: 46 },
+  insert: { key: "Insert", code: "Insert", keyCode: 45 },
+  capslock: { key: "CapsLock", code: "CapsLock", keyCode: 20 },
+  arrowup: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  up: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  arrowdown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  arrowleft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  left: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  arrowright: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  right: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  space: { key: " ", code: "Space", keyCode: 32, text: " " },
+  spacebar: { key: " ", code: "Space", keyCode: 32, text: " " },
+  pagedown: { key: "PageDown", code: "PageDown", keyCode: 34 },
+  pgdn: { key: "PageDown", code: "PageDown", keyCode: 34 },
+  pageup: { key: "PageUp", code: "PageUp", keyCode: 33 },
+  pgup: { key: "PageUp", code: "PageUp", keyCode: 33 },
+  home: { key: "Home", code: "Home", keyCode: 36 },
+  end: { key: "End", code: "End", keyCode: 35 },
+  ...Object.fromEntries(
+    Array.from({ length: 12 }, (_, index) => {
+      const number = index + 1;
+      return [`f${number}`, { key: `F${number}`, code: `F${number}`, keyCode: 111 + number }];
+    }),
+  ),
 };
 
-const MODIFIERS: Record<string, number> = { Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Command: 4, Shift: 8 };
+/**
+ * Unshifted / shifted pairs for the US layout. The shifted spelling also
+ * carries the Shift bit, so `press("!")` sends Digit1 + Shift rather than the
+ * old `code: "Key!"`.
+ */
+const PUNCTUATION: Record<string, { code: string; keyCode: number; shifted: boolean }> = {
+  "`": { code: "Backquote", keyCode: 192, shifted: false },
+  "~": { code: "Backquote", keyCode: 192, shifted: true },
+  "1": { code: "Digit1", keyCode: 49, shifted: false },
+  "!": { code: "Digit1", keyCode: 49, shifted: true },
+  "2": { code: "Digit2", keyCode: 50, shifted: false },
+  "@": { code: "Digit2", keyCode: 50, shifted: true },
+  "3": { code: "Digit3", keyCode: 51, shifted: false },
+  "#": { code: "Digit3", keyCode: 51, shifted: true },
+  "4": { code: "Digit4", keyCode: 52, shifted: false },
+  "$": { code: "Digit4", keyCode: 52, shifted: true },
+  "5": { code: "Digit5", keyCode: 53, shifted: false },
+  "%": { code: "Digit5", keyCode: 53, shifted: true },
+  "6": { code: "Digit6", keyCode: 54, shifted: false },
+  "^": { code: "Digit6", keyCode: 54, shifted: true },
+  "7": { code: "Digit7", keyCode: 55, shifted: false },
+  "&": { code: "Digit7", keyCode: 55, shifted: true },
+  "8": { code: "Digit8", keyCode: 56, shifted: false },
+  "*": { code: "Digit8", keyCode: 56, shifted: true },
+  "9": { code: "Digit9", keyCode: 57, shifted: false },
+  "(": { code: "Digit9", keyCode: 57, shifted: true },
+  "0": { code: "Digit0", keyCode: 48, shifted: false },
+  ")": { code: "Digit0", keyCode: 48, shifted: true },
+  "-": { code: "Minus", keyCode: 189, shifted: false },
+  "_": { code: "Minus", keyCode: 189, shifted: true },
+  "=": { code: "Equal", keyCode: 187, shifted: false },
+  "+": { code: "Equal", keyCode: 187, shifted: true },
+  "[": { code: "BracketLeft", keyCode: 219, shifted: false },
+  "{": { code: "BracketLeft", keyCode: 219, shifted: true },
+  "]": { code: "BracketRight", keyCode: 221, shifted: false },
+  "}": { code: "BracketRight", keyCode: 221, shifted: true },
+  "\\": { code: "Backslash", keyCode: 220, shifted: false },
+  "|": { code: "Backslash", keyCode: 220, shifted: true },
+  ";": { code: "Semicolon", keyCode: 186, shifted: false },
+  ":": { code: "Semicolon", keyCode: 186, shifted: true },
+  "'": { code: "Quote", keyCode: 222, shifted: false },
+  '"': { code: "Quote", keyCode: 222, shifted: true },
+  ",": { code: "Comma", keyCode: 188, shifted: false },
+  "<": { code: "Comma", keyCode: 188, shifted: true },
+  ".": { code: "Period", keyCode: 190, shifted: false },
+  ">": { code: "Period", keyCode: 190, shifted: true },
+  "/": { code: "Slash", keyCode: 191, shifted: false },
+  "?": { code: "Slash", keyCode: 191, shifted: true },
+};
 
-function keyParams(chord: string) {
-  const parts = chord.split("+").map((p) => p.trim()).filter(Boolean);
-  const key = parts.pop() ?? "";
+const KEY_ALIASES: Record<string, string> = {
+  alt: "Alt",
+  option: "Alt",
+  ctrl: "Control",
+  control: "Control",
+  cmd: "Meta",
+  command: "Meta",
+  meta: "Meta",
+  win: "Meta",
+  windows: "Meta",
+  shift: "Shift",
+};
+
+const SHIFTED_BY_CODE: Record<string, string> = {};
+const UNSHIFTED_BY_CODE: Record<string, string> = {};
+for (const [character, spec] of Object.entries(PUNCTUATION)) {
+  if (spec.shifted) SHIFTED_BY_CODE[spec.code] = character;
+  else UNSHIFTED_BY_CODE[spec.code] = character;
+}
+
+export type KeyEvent = {
+  key: string;
+  code: string;
+  windowsVirtualKeyCode: number;
+  nativeVirtualKeyCode: number;
+  modifiers: number;
+  text?: string;
+};
+
+export function keyParams(chord: string): KeyEvent {
+  const raw = String(chord ?? "");
+  // A bare "+" is a key, not an empty chord.
+  const parts = (raw === "+" ? ["+"] : raw.split("+")).map((part) => part.trim()).filter(Boolean);
+  const token = parts.pop() ?? "";
   let modifiers = 0;
-  for (const m of parts) modifiers |= MODIFIERS[m] ?? MODIFIERS[m[0].toUpperCase() + m.slice(1).toLowerCase()] ?? 0;
-  const known = KEYS[key] ?? KEYS[key[0]?.toUpperCase() + key.slice(1)];
-  const base = known ?? { code: key.length === 1 ? "Key" + key.toUpperCase() : key, keyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0 };
+  for (const part of parts) {
+    const name = KEY_ALIASES[part.toLowerCase()];
+    if (name) modifiers |= MODIFIER_BITS[name.toLowerCase()] ?? 0;
+  }
+
+  const named = NAMED_KEYS[token.toLowerCase()];
+  if (named) {
+    return {
+      key: named.key,
+      code: named.code,
+      windowsVirtualKeyCode: named.keyCode,
+      nativeVirtualKeyCode: named.keyCode,
+      modifiers,
+      text: named.text && (modifiers & (1 | 2 | 4)) === 0 ? named.text : undefined,
+    };
+  }
+
+  if (token.length === 1) {
+    const lower = token.toLowerCase();
+    if (/[a-z]/.test(lower)) {
+      const shifted = (modifiers & 8) !== 0;
+      const key = shifted ? lower.toUpperCase() : lower;
+      return {
+        key,
+        code: `Key${lower.toUpperCase()}`,
+        windowsVirtualKeyCode: lower.toUpperCase().charCodeAt(0),
+        nativeVirtualKeyCode: lower.toUpperCase().charCodeAt(0),
+        modifiers,
+        text: (modifiers & (1 | 2 | 4)) === 0 ? key : undefined,
+      };
+    }
+    const punctuation = PUNCTUATION[token];
+    if (punctuation) {
+      if (punctuation.shifted) modifiers |= 8;
+      const shifted = (modifiers & 8) !== 0;
+      const key = shifted
+        ? (SHIFTED_BY_CODE[punctuation.code] ?? token)
+        : (UNSHIFTED_BY_CODE[punctuation.code] ?? token);
+      return {
+        key,
+        code: punctuation.code,
+        windowsVirtualKeyCode: punctuation.keyCode,
+        nativeVirtualKeyCode: punctuation.keyCode,
+        modifiers,
+        text: (modifiers & (1 | 2 | 4)) === 0 ? key : undefined,
+      };
+    }
+  }
+
+  // Unknown named key: forward it as-is rather than inventing a KeyX code.
   return {
-    key: known ? key : key,
-    code: base.code,
-    windowsVirtualKeyCode: base.keyCode,
-    nativeVirtualKeyCode: base.keyCode,
+    key: token,
+    code: token.length === 1 ? `Key${token.toUpperCase()}` : token,
+    windowsVirtualKeyCode: token.length === 1 ? token.toUpperCase().charCodeAt(0) : 0,
+    nativeVirtualKeyCode: token.length === 1 ? token.toUpperCase().charCodeAt(0) : 0,
     modifiers,
-    text: base.text && !modifiers ? base.text : key.length === 1 && !modifiers ? key : undefined,
   };
 }
 
@@ -637,7 +844,7 @@ function keyParams(chord: string) {
  * PageHandle
  * ------------------------------------------------------------------ */
 
-type DialogPolicy = "accept" | "dismiss";
+export type DialogPolicy = "auto" | "accept" | "dismiss";
 
 /** a drag endpoint is an element locator or raw viewport coordinates */
 type DragPoint = { x: number; y: number };
@@ -692,10 +899,11 @@ class PageHandle {
   private wsUrl: string;
   private knownTargetIds: Set<string>;
   private installed = false;
-  private dialogPolicy: DialogPolicy = "accept";
+  private dialogPolicy: DialogPolicy = "auto";
   private lastDialog: { type: string; message: string; at: number } | null = null;
   private netInFlight = 0;
   private lastNetworkAt = Date.now();
+  private networkEnabled = false;
   /** last known pointer position, so an interpolated move has an origin */
   private pointer: DragPoint | null = null;
 
@@ -710,10 +918,14 @@ class PageHandle {
     });
     cdp.on("Page.javascriptDialogOpening", (p) => {
       this.lastDialog = { type: p.type, message: p.message, at: Date.now() };
+      // A beforeunload prompt silently accepted loses the page's unsaved work.
+      const accepted = this.dialogPolicy === "auto"
+        ? p.type !== "beforeunload"
+        : this.dialogPolicy === "accept";
       this.cdp
         .send("Page.handleJavaScriptDialog", {
-          accept: this.dialogPolicy === "accept",
-          promptText: this.dialogPolicy === "accept" ? "" : undefined,
+          accept: accepted,
+          promptText: accepted ? "" : undefined,
         })
         .catch(() => {});
     });
@@ -736,6 +948,18 @@ class PageHandle {
     cdp.on("Network.loadingFailed", done);
   }
 
+  private async ensureNetwork(): Promise<void> {
+    if (this.networkEnabled) return;
+    // Bound the buffers: a long-lived tab otherwise retains every response
+    // body and request header the debugger has seen.
+    await this.cdp.send(
+      "Network.enable",
+      { maxTotalBufferSize: 20 * 1024 * 1024, maxResourceBufferSize: 5 * 1024 * 1024 },
+      10_000,
+    );
+    this.networkEnabled = true;
+  }
+
   private async evaluate(expression: string, timeoutMs = 30_000): Promise<any> {
     const r = await this.cdp.send(
       "Runtime.evaluate",
@@ -745,6 +969,22 @@ class PageHandle {
     if (r.exceptionDetails) {
       const d = r.exceptionDetails;
       throw new Error(d.exception?.description ?? d.text ?? "page evaluation failed");
+    }
+    // NaN/Infinity/BigInt/-0 arrive as unserializableValue rather than value.
+    if (r.result && "unserializableValue" in r.result && r.result.unserializableValue !== undefined) {
+      const raw = String(r.result.unserializableValue);
+      if (raw === "NaN") return Number.NaN;
+      if (raw === "Infinity") return Number.POSITIVE_INFINITY;
+      if (raw === "-Infinity") return Number.NEGATIVE_INFINITY;
+      if (raw === "-0") return -0;
+      if (/n$/.test(raw)) {
+        try {
+          return BigInt(raw.slice(0, -1));
+        } catch {
+          return raw;
+        }
+      }
+      return raw;
     }
     return r.result?.value;
   }
@@ -895,47 +1135,75 @@ class PageHandle {
 
   /* ---------------------------- navigation ---------------------------- */
 
-  async goto(url: string, timeoutMs = 30_000) {
-    const target = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    this.lastNetworkAt = Date.now();
-    const loaded = new Promise<void>((resolve) => {
-      const off = this.cdp.on("Page.loadEventFired", () => {
+  /**
+   * Resolve on the next load or same-document navigation. The old goto waited
+   * the full 30s for a hash change or an SPA route update, neither of which
+   * fires Page.loadEventFired.
+   */
+  private waitForLoad(timeoutMs: number): { promise: Promise<void>; cancel: () => void } {
+    let finish = () => {};
+    const promise = new Promise<void>((resolve) => {
+      let done = false;
+      const offLoad = this.cdp.on("Page.loadEventFired", end);
+      const offWithin = this.cdp.on("Page.navigatedWithinDocument", end);
+      const timer = setTimeout(end, timeoutMs);
+      function end() {
+        if (done) return;
+        done = true;
         clearTimeout(timer);
-        off();
+        offLoad();
+        offWithin();
         resolve();
-      });
-      const timer = setTimeout(() => {
-        off();
-        resolve();
-      }, timeoutMs);
+      }
+      finish = end;
     });
+    return { promise, cancel: () => finish() };
+  }
+
+  /** Run an action that navigates, and wait for the resulting document. */
+  async waitForNavigation(action: () => Promise<unknown>, opts: { timeoutMs?: number } = {}): Promise<unknown> {
+    const waiter = this.waitForLoad(opts.timeoutMs ?? 30_000);
+    try {
+      const value = await action();
+      await waiter.promise;
+      this.installed = false;
+      return value;
+    } catch (error) {
+      waiter.cancel();
+      throw error;
+    }
+  }
+
+  async goto(url: string, timeoutMs = 30_000) {
+    const target = normalizeUrl(url);
+    this.lastNetworkAt = Date.now();
+    const waiter = this.waitForLoad(timeoutMs);
     const r = await this.cdp.send("Page.navigate", { url: target }, timeoutMs);
-    if (r.errorText) throw new Error(`navigation failed: ${r.errorText}`);
-    await loaded;
+    if (r.errorText) {
+      waiter.cancel();
+      throw new Error(`navigation failed: ${r.errorText}`);
+    }
+    await waiter.promise;
     this.installed = false;
     return this.url();
   }
 
   async reload(timeoutMs = 30_000) {
-    const loaded = new Promise<void>((resolve) => {
-      const off = this.cdp.on("Page.loadEventFired", () => {
-        clearTimeout(timer);
-        off();
-        resolve();
-      });
-      const timer = setTimeout(() => {
-        off();
-        resolve();
-      }, timeoutMs);
-    });
-    await this.cdp.send("Page.reload", {});
-    await loaded;
+    const waiter = this.waitForLoad(timeoutMs);
+    try {
+      await this.cdp.send("Page.reload", {});
+      await waiter.promise;
+    } catch (error) {
+      waiter.cancel();
+      throw error;
+    }
     this.installed = false;
     return this.url();
   }
 
-  back() {
-    return this.evaluate("(history.back(), 'ok')");
+  async back(timeoutMs = 30_000) {
+    await this.waitForNavigation(() => this.evaluate("(history.back(), 'ok')"), { timeoutMs });
+    return this.url();
   }
 
   url(): Promise<string> {
@@ -997,25 +1265,48 @@ class PageHandle {
 
   /* ---------------------------- input ---------------------------- */
 
-  async click(selector: number | string, opts: { double?: boolean; button?: "left" | "right" | "middle" } = {}) {
+  async click(
+    selector: number | string,
+    opts: { double?: boolean; button?: "left" | "right" | "middle"; modifiers?: string[] } = {},
+  ) {
     const box = await this.elementBox(selector);
     const button = opts.button ?? "left";
+    const buttons = BUTTON_BITS[button] ?? 1;
+    const modifiers = modifierMask(opts.modifiers);
     const clickCount = opts.double ? 2 : 1;
-    await this.mouseMove(box.x, box.y);
+    await this.mouseMove(box.x, box.y, { modifiers: opts.modifiers });
     for (let i = 1; i <= clickCount; i++) {
-      await this.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.x, y: box.y, button, clickCount: i });
-      await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.x, y: box.y, button, clickCount: i });
+      // `button` says which button this event is about; `buttons` says which
+      // buttons are currently held. Canvas and drag handlers read the latter.
+      await this.cdp.send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: box.x,
+        y: box.y,
+        button,
+        buttons,
+        clickCount: i,
+        modifiers,
+      });
+      await this.cdp.send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: box.x,
+        y: box.y,
+        button,
+        buttons: 0,
+        clickCount: i,
+        modifiers,
+      });
     }
     return `clicked ${String(selector)} at ${Math.round(box.x)},${Math.round(box.y)}`;
   }
 
-  dblclick(selector: number | string) {
-    return this.click(selector, { double: true });
+  dblclick(selector: number | string, opts: { modifiers?: string[] } = {}) {
+    return this.click(selector, { double: true, modifiers: opts.modifiers });
   }
 
-  async hover(selector: number | string) {
+  async hover(selector: number | string, opts: { steps?: number; delay?: number } = {}) {
     const box = await this.elementBox(selector);
-    await this.mouseMove(box.x, box.y);
+    await this.mouseMove(box.x, box.y, opts);
     return `hovered ${String(selector)}`;
   }
 
@@ -1165,6 +1456,7 @@ class PageHandle {
       nativeVirtualKeyCode: k.nativeVirtualKeyCode,
       modifiers: k.modifiers,
       text: k.text,
+      unmodifiedText: k.text,
     });
     await this.cdp.send("Input.dispatchKeyEvent", {
       type: "keyUp",
@@ -1178,38 +1470,71 @@ class PageHandle {
   }
 
   async typeText(text: string, opts: { delay?: number } = {}) {
+    // A single insertText is one round trip instead of two per character.
+    // With a delay the caller wants real key events, so keep the old path.
+    if (!opts.delay) {
+      await this.cdp.send("Input.insertText", { text });
+      return `typed ${text.length} chars`;
+    }
     for (const ch of text) {
       await this.cdp.send("Input.dispatchKeyEvent", { type: "keyDown", text: ch, key: ch, unmodifiedText: ch });
       await this.cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: ch });
-      if (opts.delay) await new Promise((r) => setTimeout(r, opts.delay));
+      await new Promise((r) => setTimeout(r, opts.delay));
     }
     return `typed ${text.length} chars`;
   }
 
-  async selectOption(selector: number | string, value: string) {
+  async selectOption(
+    selector: number | string,
+    value: string | { value?: string; label?: string; index?: number },
+  ) {
     await this.ensureHelpers();
+    const wanted = typeof value === "object" && value !== null ? value : { value: String(value) };
     const res = await this.evaluate(`(() => {
       const el = window.__mai.find(${JSON.stringify(selector)});
-      if (!el) return null;
-      el.value = ${JSON.stringify(value)};
+      if (!el || el.tagName !== 'SELECT') return { error: 'element not found or not a select' };
+      const wanted = ${JSON.stringify(wanted)};
+      const options = [...el.options];
+      const option = wanted.index !== undefined
+        ? options[Number(wanted.index)]
+        : options.find((item) => item.value === wanted.value || item.label === wanted.label || item.text === wanted.label);
+      if (!option) return { error: 'no matching option' };
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+      if (setter) setter.call(el, option.value); else el.value = option.value;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      return el.value;
+      return { value: el.value, label: option.label };
     })()`);
-    if (res === null) throw new Error(`element not found: ${String(selector)}`);
-    return `selected "${res}"`;
+    if (!res || res.error) throw new Error(res?.error ?? "could not select option");
+    return `selected "${res.value}"`;
   }
 
-  async setInputFiles(selector: string, files: string | string[]) {
+  async setInputFiles(selector: number | string, files: string | string[]) {
     const list = (Array.isArray(files) ? files : [files]).map((f) => path.resolve(f));
     for (const f of list) {
       if (!fs.existsSync(f)) throw new Error(`file not found: ${f}`);
     }
-    const { root } = await this.cdp.send("DOM.getDocument", { depth: -1, pierce: true });
-    const { nodeId } = await this.cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
-    if (!nodeId) throw new Error(`element not found: ${selector}`);
-    await this.cdp.send("DOM.setFileInputFiles", { nodeId, files: list });
-    return `attached ${list.length} file(s) to ${selector}`;
+    await this.ensureHelpers();
+    await this.cdp.send("DOM.enable").catch(() => {});
+    // Resolve through the same locator engine as every other method, then
+    // turn the JS object into a DOM node. The old DOM.querySelector path only
+    // understood CSS and pulled the entire document for every upload.
+    const evaluated = await this.cdp.send("Runtime.evaluate", {
+      expression: `window.__mai.find(${JSON.stringify(selector)})`,
+      returnByValue: false,
+      objectGroup: "raw-file-input",
+      userGesture: true,
+    });
+    const objectId = evaluated?.result?.objectId;
+    if (!objectId) throw new Error(`element not found: ${String(selector)}`);
+    try {
+      const { nodeId } = await this.cdp.send("DOM.requestNode", { objectId });
+      if (!nodeId) throw new Error(`element not found: ${String(selector)}`);
+      await this.cdp.send("DOM.setFileInputFiles", { nodeId, files: list });
+    } finally {
+      await this.cdp.send("Runtime.releaseObject", { objectId }).catch(() => {});
+    }
+    return `attached ${list.length} file(s) to ${String(selector)}`;
   }
 
   /* ---------------------------- waiting ---------------------------- */
@@ -1246,11 +1571,12 @@ class PageHandle {
     predicate:
       | string
       | RegExp
-      | ((response: { url: string; status: number; mimeType?: string; resourceType?: string; headers?: Record<string, string> }) => boolean),
+      | ((response: { url: string; status: number; mimeType?: string; resourceType?: string; headers?: Record<string, string>; requestId?: string }) => boolean),
     opts: { timeout?: number; resourceType?: string; status?: number } = {},
   ) {
     const timeout = opts.timeout ?? 30_000;
     const wantedType = opts.resourceType?.toLowerCase();
+    await this.ensureNetwork();
     return await new Promise<string>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let off: (() => void) | undefined;
@@ -1265,15 +1591,22 @@ class PageHandle {
           mimeType: p?.response?.mimeType as string | undefined,
           resourceType: p?.type as string | undefined,
           headers: p?.response?.headers as Record<string, string> | undefined,
+          requestId: p?.requestId as string | undefined,
         };
         if (wantedType && String(response.resourceType ?? "").toLowerCase() !== wantedType) return;
         if (opts.status !== undefined && response.status !== opts.status) return;
-        const hit =
-          typeof predicate === "function"
+        let hit = false;
+        try {
+          hit = typeof predicate === "function"
             ? predicate(response)
             : predicate instanceof RegExp
               ? predicate.test(response.url)
               : response.url.includes(String(predicate));
+        } catch (error) {
+          stop();
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
         if (!hit) return;
         stop();
         resolve(`${response.status} ${response.url}`);
@@ -1338,7 +1671,11 @@ class PageHandle {
   async waitForFunction(fnOrExpr: string, opts: { timeout?: number; polling?: number } = {}) {
     const deadline = Date.now() + (opts.timeout ?? 15_000);
     while (Date.now() < deadline) {
-      const value = await this.evaluate(`(() => { const fn = (${fnOrExpr}); return typeof fn === 'function' ? !!fn() : !!(${fnOrExpr}); })()`);
+      const value = await this.evaluate(`(async () => {
+        let value = (${fnOrExpr});
+        if (typeof value === 'function') value = value();
+        return await value;
+      })()`);
       if (value) return "condition met";
       await new Promise((r) => setTimeout(r, opts.polling ?? 200));
     }
@@ -1347,9 +1684,15 @@ class PageHandle {
 
   async waitForURL(pattern: string, opts: { timeout?: number } = {}) {
     const deadline = Date.now() + (opts.timeout ?? 15_000);
+    let matcher: RegExp | null = null;
+    try {
+      matcher = new RegExp(pattern);
+    } catch {
+      matcher = null;
+    }
     while (Date.now() < deadline) {
       const href = await this.url();
-      if (href.includes(pattern) || new RegExp(pattern).test(href)) return href;
+      if (href.includes(pattern) || (matcher && matcher.test(href))) return href;
       await new Promise((r) => setTimeout(r, 200));
     }
     throw new Error(`timed out waiting for URL matching ${pattern}`);
@@ -1360,6 +1703,7 @@ class PageHandle {
     const timeout = opts.timeout ?? 20_000;
     const deadline = Date.now() + timeout;
     if (state === "networkidle") {
+      await this.ensureNetwork();
       // "no new network activity for idleMs" — long-polls and analytics beacons
       // mean a real page rarely reaches zero in-flight requests.
       const idle = opts.idleMs ?? 600;
@@ -1386,12 +1730,32 @@ class PageHandle {
    * Capture the page. The PNG/JPEG is always written to disk, and is also
    * handed back to the model as an image when called from a browser script.
    */
-  async screenshot(opts: { path?: string; fullPage?: boolean; inline?: boolean; format?: "png" | "jpeg"; quality?: number } = {}) {
+  async screenshot(opts: {
+    path?: string;
+    fullPage?: boolean;
+    inline?: boolean;
+    format?: "png" | "jpeg";
+    quality?: number;
+    element?: number | string;
+    clip?: { x: number; y: number; width: number; height: number; scale?: number };
+  } = {}) {
     const format = opts.format ?? "png";
+    let clip = opts.clip;
+    if (opts.element !== undefined) {
+      const box = await this.elementBox(opts.element);
+      clip = {
+        x: box.x - box.w / 2,
+        y: box.y - box.h / 2,
+        width: box.w,
+        height: box.h,
+        scale: 1,
+      };
+    }
     const r = await this.cdp.send("Page.captureScreenshot", {
       format,
       ...(format === "jpeg" ? { quality: Math.min(100, Math.max(1, opts.quality ?? 70)) } : {}),
-      captureBeyondViewport: opts.fullPage === true,
+      ...(clip ? { clip } : {}),
+      captureBeyondViewport: opts.fullPage === true || clip !== undefined,
     });
     const data = r.data as string;
     const bytes = Buffer.from(data, "base64").length;
@@ -1417,6 +1781,7 @@ class PageHandle {
   async downloads() {
     await ensureBrowserCdp();
     return [...downloads.values()].map((d) => ({
+      id: d.guid,
       url: d.url,
       filename: d.filename,
       state: d.state,
@@ -1436,7 +1801,7 @@ class PageHandle {
       if (done) {
         const file = resolveDownloadFile(done);
         if (done.state === "canceled") throw new Error(`download of ${done.filename} was canceled`);
-        return { path: file, filename: path.basename(file), bytes: done.bytes, url: done.url };
+        return { id: done.guid, path: file, filename: path.basename(file), bytes: done.bytes, url: done.url };
       }
       await new Promise((r) => setTimeout(r, 200));
     }
@@ -1449,6 +1814,7 @@ class PageHandle {
    */
   async waitForFileChooser(opts: { timeoutMs?: number } = {}) {
     await this.cdp.send("Page.setInterceptFileChooserDialog", { enabled: true }).catch(() => {});
+    await this.cdp.send("DOM.enable").catch(() => {});
     const deadline = Date.now() + (opts.timeoutMs ?? 15_000);
     while (Date.now() < deadline) {
       if (this.chooser) {
@@ -1485,15 +1851,11 @@ class PageHandle {
 
   setDialogPolicy(policy: DialogPolicy) {
     this.dialogPolicy = policy;
-    return `dialogs will be ${policy}ed`;
+    return `dialogs will use policy ${policy}`;
   }
 
   dialog() {
     return this.lastDialog;
-  }
-
-  async screenshot_removed() {
-    return "";
   }
 
   /** fetch from inside the page, so the profile's cookies authenticate it */
@@ -1505,17 +1867,41 @@ class PageHandle {
         body: ${opts.body ? JSON.stringify(opts.body) : "undefined"},
         credentials: 'include',
       });
-      const text = await res.text();
-      return { status: res.status, contentType: res.headers.get('content-type') || '', text };
+      const buffer = await res.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      if (bytes.length > 20 * 1024 * 1024) throw new Error('response exceeded 20 MB');
+      const contentType = res.headers.get('content-type') || '';
+      const textual = !contentType || /^(text\\/|application\\/(json|xml|javascript|x-www-form-urlencoded)|[^;]+\\+(json|xml))/i.test(contentType);
+      let text;
+      let base64;
+      if (textual) {
+        text = new TextDecoder().decode(bytes);
+      } else {
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        base64 = btoa(binary);
+      }
+      return { status: res.status, contentType, text, base64, bytes: bytes.length };
     })()`;
-    const out = (await this.evaluate(expression, 60_000)) as { status: number; contentType: string; text: string };
+    const out = (await this.evaluate(expression, 60_000)) as {
+      status: number;
+      contentType: string;
+      text?: string;
+      base64?: string;
+      bytes: number;
+    };
     if (opts.saveAs) {
       const file = path.resolve(opts.saveAs);
       ensureDir(path.dirname(file));
-      fs.writeFileSync(file, out.text);
-      return { status: out.status, contentType: out.contentType, path: file, bytes: out.text.length };
+      fs.writeFileSync(file, out.base64 !== undefined ? Buffer.from(out.base64, "base64") : out.text ?? "");
+      return { status: out.status, contentType: out.contentType, path: file, bytes: out.bytes };
     }
-    return { status: out.status, contentType: out.contentType, text: truncate(out.text, 20_000) };
+    if (out.base64 !== undefined) {
+      return { status: out.status, contentType: out.contentType, base64: out.base64, bytes: out.bytes };
+    }
+    return { status: out.status, contentType: out.contentType, text: truncate(out.text ?? "", 20_000), bytes: out.bytes };
   }
 
   scroll(dy = 800) {
@@ -1537,7 +1923,7 @@ class PageHandle {
   private async bridgeOnly(method: string, params: Record<string, unknown> = {}): Promise<any> {
     if (!EXTERNAL_BRIDGE) {
       throw new Error(
-        `${method} needs the Edge extension bridge. Start the bridge host and set RAW_BROWSER_EXTERNAL_BRIDGE=1 — plain CDP has no equivalent.`,
+        `${method} needs the browser extension bridge. Start the bridge host and set RAW_BROWSER_EXTERNAL_BRIDGE=1 — plain CDP has no equivalent.`,
       );
     }
     return await this.browserCdpSend(method, params);
@@ -1656,8 +2042,10 @@ class PageHandle {
   }
 
   /** cancel a download by the id reported by page.downloads() */
-  async cancelDownload(id: number) {
-    return await this.bridgeOnly("Raw.cancelDownload", { id });
+  async cancelDownload(id: number | string) {
+    if (EXTERNAL_BRIDGE) return await this.bridgeOnly("Raw.cancelDownload", { id });
+    const cdp = await ensureBrowserCdp();
+    return await cdp.send("Browser.cancelDownload", { guid: String(id) });
   }
 
   /** enable or disable another installed extension */
@@ -1667,8 +2055,48 @@ class PageHandle {
 
   /** every frame in a tab, including cross-origin iframes, with its URL */
   async frames(opts: { tabId?: number } = {}) {
-    const tabId = opts.tabId ?? Number(this.targetId());
-    return await this.bridgeOnly("Raw.frames", { tabId });
+    if (EXTERNAL_BRIDGE) {
+      const tabId = opts.tabId ?? Number(this.targetId());
+      return await this.bridgeOnly("Raw.frames", { tabId });
+    }
+    const { frameTree } = (await this.cdp.send("Page.getFrameTree")) as {
+      frameTree?: { frame: { id: string; parentId?: string; url: string }; childFrames?: any[] };
+    };
+    const out: Array<{ frameId: string; parentFrameId: string | null; url: string; errorOccurred: boolean }> = [];
+    const visit = (node: any, parent: string | null) => {
+      if (!node?.frame) return;
+      out.push({
+        frameId: node.frame.id,
+        parentFrameId: parent,
+        url: node.frame.url ?? "",
+        errorOccurred: false,
+      });
+      for (const child of node.childFrames ?? []) visit(child, node.frame.id);
+    };
+    if (frameTree) visit(frameTree, null);
+    return out;
+  }
+
+  /**
+   * A compact accessibility tree. Complex widgets expose roles and names here
+   * that are far more stable than CSS classes.
+   */
+  async axSnapshot(opts: { max?: number; interestingOnly?: boolean } = {}) {
+    await this.cdp.send("Accessibility.enable");
+    const { nodes } = (await this.cdp.send("Accessibility.getFullAXTree", {}, 30_000)) as { nodes?: any[] };
+    const max = Math.max(1, Math.min(Number(opts.max) || 500, 5000));
+    const interest = opts.interestingOnly !== false;
+    return (nodes ?? [])
+      .filter((node) => !node.ignored)
+      .filter((node) => !interest || node.role?.value !== "generic")
+      .slice(0, max)
+      .map((node) => ({
+        role: node.role?.value ?? "",
+        name: node.name?.value ?? "",
+        description: node.description?.value ?? "",
+        value: node.value?.value,
+        nodeId: node.nodeId,
+      }));
   }
 
   /** inject a stylesheet into a tab (this tab by default) */
@@ -1741,7 +2169,8 @@ async function browserStatusLocal(): Promise<string> {
   return [
     `debugger: ${alive ? `running on port ${PORT} (${alive.Browser ?? "browser"})` : "not running"}`,
     `attach: ${alive ? (owned ? "will reuse the running browser" : "refused: the running browser is not owned by raw") : "will launch on first use"}`,
-    `profile: ${EXTERNAL_BRIDGE ? "Edge Default (extension bridge)" : PROFILE}`,
+    `bridge: ${EXTERNAL_BRIDGE ? `${BRIDGE_BROWSER} extension (${BRIDGE_CONFIG_FILE})` : "off (direct CDP)"}`,
+    `profile: ${EXTERNAL_BRIDGE ? `${BRIDGE_BROWSER} Default profile` : PROFILE}`,
     `mode: ${HEADLESS ? "headless" : "headful"}`,
     `binary: ${findBrowser() ?? "not found (set RAW_BROWSER_PATH)"}`,
   ].join("\n");
@@ -1983,13 +2412,8 @@ if (!isMainThread && parentPort) {
       parentPort!.postMessage({ id, kind: "handoff", message, timeoutMs } satisfies WorkerReply);
     }),
   );
-  parentPort.on("message", async (request: WorkerRequest) => {
-    if (request.kind === "handoff-result") {
-      const resolve = handoffs.get(request.id);
-      handoffs.delete(request.id);
-      resolve?.(request.value);
-      return;
-    }
+  let chain: Promise<void> = Promise.resolve();
+  const handle = async (request: WorkerRequest): Promise<void> => {
     try {
       let value: unknown;
       if (request.kind === "run") {
@@ -2001,7 +2425,7 @@ if (!isMainThread && parentPort) {
         }
       }
       else if (request.kind === "status") value = await browserStatusLocal();
-      else {
+      else if (request.kind === "close") {
         await closeBrowserLocal();
         value = undefined;
       }
@@ -2013,6 +2437,17 @@ if (!isMainThread && parentPort) {
         error: err instanceof Error ? (err.stack ?? err.message) : String(err),
       } satisfies WorkerReply);
     }
+  };
+  parentPort.on("message", (request: WorkerRequest) => {
+    if (request.kind === "handoff-result") {
+      const resolve = handoffs.get(request.id);
+      handoffs.delete(request.id);
+      resolve?.(request.value);
+      return;
+    }
+    // One script at a time: `session`, `activeImages` and `scriptReadyHook`
+    // are process-global, so concurrent runs would mix screenshots and pages.
+    chain = chain.then(() => handle(request));
   });
 }
 

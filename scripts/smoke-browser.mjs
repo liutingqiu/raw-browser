@@ -28,9 +28,14 @@ const { closeBrowser, runBrowserScript } = await import("../dist/browser.js");
 
 const html = `<!doctype html>
 <input id="name" aria-label="Name">
-<select id="choice"><option value="a">A</option><option value="b">B</option></select>
+<select id="choice"><option value="a">A</option><option value="b">Label B</option></select>
 <a id="download" href="/download" download="fixture.txt">Download</a>
-<iframe srcdoc="<button id='b' onclick='document.body.dataset.hit=1'>Go</button>"></iframe>`;
+<div id="shadow-host"></div>
+<iframe srcdoc="<button id='b' onclick='document.body.dataset.hit=1'>Go</button>"></iframe>
+<script>
+  const root = document.getElementById('shadow-host').attachShadow({ mode: 'open' });
+  root.innerHTML = '<button id="shadow-btn" onclick="document.body.dataset.shadow=1">Shadow</button>';
+</script>`;
 const server = http.createServer((req, res) => {
   if (req.url === "/download") {
     res.setHeader("content-type", "text/plain");
@@ -48,21 +53,31 @@ const url = `http://127.0.0.1:${address.port}`;
 const script = `
   await page.goto(${JSON.stringify(url)});
   await page.fill("#name", "raw user");
-  await page.selectOption("#choice", "b");
+  await page.selectOption("#choice", { label: "Label B" });
   if (await page.eval("document.querySelector('#name').value") !== "raw user") throw new Error("fill did not land");
   if (await page.eval("document.querySelector('#choice').value") !== "b") throw new Error("select did not land");
+  await page.waitForFunction("async () => true", { timeout: 2000 });
+  await page.click("css=#shadow-btn");
+  if (await page.eval("document.body.dataset.shadow") !== "1") throw new Error("shadow-DOM click did not land");
   await page.waitForSelector("role=button[name=Go]");
   const found = await page.find("role=button[name=Go]");
   if (!found || found.tag !== "button") throw new Error("button in iframe was not found");
   await page.click("role=button[name=Go]");
   const hit = await page.eval("document.querySelector('iframe').contentDocument.body.dataset.hit");
   if (hit !== "1") throw new Error("iframe click did not land");
-  const waiting = page.waitForDownload({ timeoutMs: 10000 });
+  const waiting = page.waitForDownload({ timeoutMs: 20000 });
   await page.click("#download");
   const downloaded = await waiting;
   if (downloaded.bytes !== 16) throw new Error("download size mismatch: " + downloaded.bytes);
+  if (!downloaded.id) throw new Error("download result has no id for cancelDownload");
   const shot = await page.screenshot();
   if (!shot.attached || !shot.bytes) throw new Error("screenshot was not attached");
+  const elementShot = await page.screenshot({ element: "#name" });
+  if (!elementShot.bytes) throw new Error("element screenshot produced nothing");
+  const frames = await page.frames();
+  if (!Array.isArray(frames) || frames.length < 2) throw new Error("frame tree did not include the iframe");
+  const ax = await page.axSnapshot();
+  if (!Array.isArray(ax) || !ax.length) throw new Error("accessibility snapshot was empty");
   const first = await space("first");
   const firstPage = await first.newPage(${JSON.stringify(url)});
   await firstPage.eval("document.cookie='isolated=first'");
@@ -118,7 +133,7 @@ try {
   const result = await runBrowserScript(script, { timeoutMs: 30_000 });
   console.log(result.text);
   assert.equal(result.text.startsWith("Error:"), false, result.text);
-  assert.equal(result.images?.length, 1);
+  assert.equal(result.images?.length, 2);
   assert.equal(fs.readFileSync(path.join(downloads, "fixture.txt"), "utf8"), "download fixture");
 
   const ac = new AbortController();

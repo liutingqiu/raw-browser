@@ -17,6 +17,8 @@ function plain(value) {
 function loadCore() {
   const context = vm.createContext({
     navigator: { userAgent: "Mock Edge", userAgentData: { brands: [{ brand: "Microsoft Edge", version: "140" }] } },
+    setTimeout,
+    clearTimeout,
   });
   vm.runInContext(coreSource, context, { filename: "bridge-core.js" });
   return context.RawEdgeBridgeCore;
@@ -121,6 +123,7 @@ function createChromeMock(initialTabs = []) {
       },
     },
     runtime: {
+      id: "mock-extension-id",
       getURL(assetPath) {
         return `chrome-extension://mock/${assetPath}`;
       },
@@ -633,4 +636,50 @@ test("Raw.frames lists every frame in a tab, cross-origin ones included", async 
     { frameId: 3, parentFrameId: 0, url: "https://embed.test/", errorOccurred: false },
   ]);
   assert.deepEqual(mock.calls.frames[0], { tabId: 11 });
+});
+
+test("destructive browser-level actions require an explicit target or confirmation", async () => {
+  const { createBridgeExecutor } = loadCore();
+  const mock = createChromeMock(fixtures);
+  const bridge = createBridgeExecutor(mock.chrome);
+
+  await assert.rejects(
+    bridge.execute({ op: "browserCdp", payload: { method: "Browser.close", params: {} } }),
+    /disabled in extension mode/,
+  );
+  await assert.rejects(
+    bridge.execute({ op: "browserCdp", payload: { method: "Raw.closeBrowser", params: {} } }),
+    /confirm: true/,
+  );
+  const closed = await bridge.execute({ op: "browserCdp", payload: { method: "Raw.closeBrowser", params: { confirm: true } } });
+  assert.equal(closed.ok, true);
+  assert.equal(mock.calls.windowRemove.length, 2);
+
+  await assert.rejects(
+    bridge.execute({ op: "browserCdp", payload: { method: "Target.closeTarget", params: {} } }),
+    /requires targetId/,
+  );
+  await assert.rejects(
+    bridge.execute({ op: "browserCdp", payload: { method: "Target.createTarget", params: { url: "about:blank", browserContextId: "ctx" } } }),
+    /isolated browser contexts/,
+  );
+});
+
+test("the bridge refuses to disable itself", async () => {
+  const { createBridgeExecutor } = loadCore();
+  const mock = createChromeMock(fixtures);
+  const bridge = createBridgeExecutor(mock.chrome);
+  await assert.rejects(
+    bridge.execute({ op: "browserCdp", payload: { method: "Raw.setExtensionEnabled", params: { id: mock.chrome.runtime.id, enabled: false } } }),
+    /refusing to disable/,
+  );
+  assert.equal(mock.calls.setEnabled.length, 0);
+});
+
+test("download behaviour is reported as unsupported rather than silently ignored", async () => {
+  const { createBridgeExecutor } = loadCore();
+  const mock = createChromeMock(fixtures);
+  const bridge = createBridgeExecutor(mock.chrome);
+  const result = await bridge.execute({ op: "browserCdp", payload: { method: "Browser.setDownloadBehavior", params: {} } });
+  assert.deepEqual(plain(result), { supported: false });
 });

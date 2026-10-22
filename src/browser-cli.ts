@@ -17,18 +17,15 @@ Options:
   --space NAME          Use an ephemeral isolated browser context
   --headless            Launch the browser headless when it is not already running
   --profile PATH        Override the persistent browser profile directory
-  --port N              Override the CDP port (default: 9333)
+  --port N              Override the CDP port (default 9222 direct, 9333/9334 bridge)
   --browser PATH        Use a specific Chrome or Edge executable
   --downloads PATH      Override the browser download directory
   --output-dir PATH     Directory for inline images returned by the runtime
   -h, --help            Show this help
-`;
 
-function fail(message: string): never {
-  process.stderr.write(`raw: ${message}\n`);
-  process.exitCode = 2;
-  throw new Error(message);
-}
+The profile config at ~/.raw/browser-profiles/current.json selects direct CDP
+mode or an extension bridge (mode "edge-extension" / "chrome-extension").
+`;
 
 function takeValue(args: string[], index: number, option: string): string {
   const value = args[index + 1];
@@ -40,29 +37,45 @@ const args = process.argv.slice(2);
 let command = "run";
 if (args[0] && !args[0].startsWith("-")) command = args.shift()!;
 
-const rawHome = path.join(os.homedir(), ".raw");
+const rawHome = process.env.RAW_HOME || path.join(os.homedir(), ".raw");
 const browserProfileConfig = path.join(rawHome, "browser-profiles", "current.json");
 let defaultBrowserProfile = path.join(rawHome, "codex-browser-profile");
 let defaultBrowserPath: string | undefined;
-let defaultBrowserMode: string | undefined;
+let bridgeBrowser: "edge" | "chrome" | undefined;
+
 try {
-  const current = JSON.parse(fs.readFileSync(browserProfileConfig, "utf8"));
+  const current = JSON.parse(fs.readFileSync(browserProfileConfig, "utf8").replace(/^﻿/, ""));
   if (typeof current.profile === "string" && path.isAbsolute(current.profile)) defaultBrowserProfile = current.profile;
   if (typeof current.browser === "string" && path.isAbsolute(current.browser)) defaultBrowserPath = current.browser;
-  if (typeof current.mode === "string") defaultBrowserMode = current.mode;
+  if (current.mode === "edge-extension") bridgeBrowser = "edge";
+  else if (current.mode === "chrome-extension") bridgeBrowser = "chrome";
+  else if (current.mode === "extension") bridgeBrowser = current.browser === "chrome" ? "chrome" : "edge";
 } catch (error: any) {
-  if (error?.code !== "ENOENT") throw new Error(`invalid browser profile config ${browserProfileConfig}: ${error.message}`);
+  if (error?.code !== "ENOENT") {
+    process.stderr.write(`raw: invalid browser profile config ${browserProfileConfig}: ${error.message}\n`);
+    process.exit(2);
+  }
 }
 
-process.env.RAW_BROWSER_PORT ??= "9333";
 process.env.RAW_BROWSER_PROFILE ??= defaultBrowserProfile;
 if (defaultBrowserPath) process.env.RAW_BROWSER_PATH ??= defaultBrowserPath;
-if (defaultBrowserMode === "edge-extension") {
-  const bridgeConfigPath = path.join(rawHome, "edge-bridge.json");
-  const bridgeConfig = JSON.parse(fs.readFileSync(bridgeConfigPath, "utf8"));
-  if (typeof bridgeConfig.token !== "string" || !bridgeConfig.token) throw new Error(`invalid Edge bridge config ${bridgeConfigPath}`);
-  process.env.RAW_BROWSER_EXTERNAL_BRIDGE ??= "1";
-  process.env.RAW_BROWSER_BRIDGE_TOKEN ??= bridgeConfig.token;
+if (bridgeBrowser) {
+  const bridgeConfigPath = path.join(rawHome, `${bridgeBrowser}-bridge.json`);
+  try {
+    const bridgeConfig = JSON.parse(fs.readFileSync(bridgeConfigPath, "utf8").replace(/^﻿/, ""));
+    if (typeof bridgeConfig.token !== "string" || !bridgeConfig.token) {
+      throw new Error("missing token");
+    }
+    process.env.RAW_BROWSER_EXTERNAL_BRIDGE ??= "1";
+    process.env.RAW_BROWSER_BRIDGE_BROWSER ??= bridgeBrowser;
+    process.env.RAW_BROWSER_BRIDGE_TOKEN ??= bridgeConfig.token;
+    process.env.RAW_BRIDGE_CONFIG ??= bridgeConfigPath;
+  } catch (error: any) {
+    process.stderr.write(
+      `raw: cannot use the ${bridgeBrowser} extension bridge (${bridgeConfigPath}): ${error.message}. Run scripts/install-edge-bridge.ps1 first.\n`,
+    );
+    process.exit(2);
+  }
 }
 process.env.RAW_DOWNLOAD_DIR ??= path.join(rawHome, "codex-browser-downloads");
 
@@ -93,6 +106,14 @@ if (command === "help" || args.includes("-h") || args.includes("--help")) {
     }
 
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3_600_000) throw new Error("--timeout-ms must be an integer between 1 and 3600000");
+
+    const bridgeMode = process.env.RAW_BROWSER_EXTERNAL_BRIDGE === "1";
+    if (space && bridgeMode) {
+      throw new Error("--space needs Target.createBrowserContext, which the extension bridge cannot provide. Use direct CDP mode or drop --space.");
+    }
+    if (process.env.RAW_BROWSER_HEADLESS === "1" && bridgeMode) {
+      process.stderr.write("raw: --headless is ignored in extension bridge mode; that browser is already running.\n");
+    }
 
     const runtime = await import("./browser.ts");
     if (command === "status") {

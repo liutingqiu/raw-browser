@@ -1,19 +1,22 @@
-# Raw Edge Bridge
+# Raw Browser Bridge
 
-Raw Edge Bridge lets Raw drive ordinary tabs in the user's real Microsoft Edge
-Default profile. Authentication remains inside Edge; the bridge does not copy,
-decrypt, export, or log cookies.
+Raw Browser Bridge lets Raw drive ordinary tabs in the user's real Microsoft
+Edge or Google Chrome Default profile. Authentication remains inside the
+browser; the bridge does not copy, decrypt, export, or log cookies.
 
 ## Components
 
-- `extension/`: an unpacked Manifest V3 Edge extension. It uses
-  `chrome.debugger` for page-level CDP and connects to the local native host.
+- `extension/`: an unpacked Manifest V3 extension that works in both Edge and
+  Chrome. It uses `chrome.debugger` for page-level CDP and connects to the local
+  native host.
 - `host/`: a .NET native-messaging host. It exposes a token-protected CDP facade
-  on `127.0.0.1:9333` for the existing Raw browser runtime.
-- `scripts/install-edge-bridge.ps1`: builds a versioned host, generates a local
-  random token, and registers the native host for the current Windows user.
+  on loopback for the existing Raw browser runtime: Edge on `127.0.0.1:9333`,
+  Chrome on `127.0.0.1:9334`.
+- `scripts/install-edge-bridge.ps1`: builds a versioned host, copies it to
+  `raw-edge-bridge.exe` and `raw-chrome-bridge.exe`, generates independent local
+  tokens, and registers both native hosts for the current Windows user.
 
-The extension exposes tabs across Edge windows. Page-scoped CDP commands are
+The extension exposes tabs across browser windows. Page-scoped CDP commands are
 forwarded without a method allowlist, including Network and Storage commands.
 Browser- and Target-domain commands are routed through extension APIs when a
 tab-scoped `chrome.debugger` session cannot perform them directly. The user's
@@ -21,60 +24,81 @@ prompt and permission mode govern which actions an agent may take.
 
 ## Install
 
-Run the installer:
-
 ```powershell
-& .\scripts\install-edge-bridge.ps1
+# both browsers (default)
+& .\scripts\install-edge-bridge.ps1 -Browser both
+
+# or one of them
+& .\scripts\install-edge-bridge.ps1 -Browser edge
+& .\scripts\install-edge-bridge.ps1 -Browser chrome
 ```
 
-Open `edge://extensions`, enable Developer mode, choose **Load unpacked**, and
-select `edge-bridge\extension`. The extension ID must be
-`gfpadofoapicldopjkghnfbnbkljihmk`.
+Open `edge://extensions` and/or `chrome://extensions`, enable Developer mode,
+choose **Load unpacked**, and select `edge-bridge\extension`. The extension ID
+must be `gfpadofoapicldopjkghnfbnbkljihmk`; the installer verifies the manifest
+key before registering anything.
 
-Load unpacked is the only install that survives an Edge restart. Both
+Load unpacked is the only install that survives a browser restart. Both
 `--load-extension=...` and the CDP `Extensions.loadUnpacked` call load the
 extension for the current browser session only: the profile keeps no record of
-it, so the next ordinary Edge launch has no bridge and port 9333 stays closed.
-Loading it once through `edge://extensions` takes effect immediately, without a
+it, so the next ordinary launch has no bridge and the port stays closed.
+Loading it once through the extensions page takes effect immediately, without a
 restart, and every later launch picks it up.
 
-Set `mode` to `edge-extension` in
-`~/.raw/browser-profiles/current.json`. The installed `raw-browser.mjs` wrapper
-then reads `~/.raw/edge-bridge.json`, authenticates to the local facade, and
-uses the real Edge profile.
+Set `mode` in `~/.raw/browser-profiles/current.json`:
+
+```json
+{ "mode": "edge-extension" }
+```
+
+or
+
+```json
+{ "mode": "chrome-extension" }
+```
+
+The installed `raw-bridge.mjs` wrapper then reads
+`~/.raw/edge-bridge.json` or `~/.raw/chrome-bridge.json`, authenticates to the
+matching local facade, and uses the real browser profile.
 
 ## Troubleshooting
 
-A `fetch failed` from the bridge, or nothing listening on `127.0.0.1:9333`,
-means the extension is not running in this Edge session. Check
-`edge://extensions` for **Raw Edge Bridge**; if it is missing, load
-`edge-bridge\extension` again. The same symptom appears if Edge is running a
-different profile from the one the extension was loaded into.
+A `fetch failed` from the bridge, or nothing listening on the expected port,
+means the extension is not running in that browser session. Check the
+extensions page for **Raw Browser Bridge**; if it is missing, load
+`edge-bridge\extension` again. The same symptom appears if the browser is
+running a different profile from the one the extension was loaded into.
 
 The host process is started by the extension, not by the installer, and it
-exits when the extension detaches. Only one host serves the port: a host that
-is launched through native messaging retires older instances, and the extension
-therefore keeps a single native port. If the port flaps between samples, look
-for repeated `connect()` calls in `service-worker.js`; every extra port starts
-another host that kills the previous one.
+exits when the extension detaches. Only one host serves each port: a host that
+is launched through native messaging retires older instances of the same
+browser build, and the extension therefore keeps a single native port. If the
+port flaps between samples, look for repeated `connect()` calls in
+`service-worker.js`; every extra port starts another host that kills the
+previous one.
 
-Ephemeral Raw Spaces remain unavailable because Edge extensions cannot create
-an incognito browser context equivalent to CDP `Target.createBrowserContext`.
-Closing a Raw session only detaches the debugger; it does not close Edge.
+Ephemeral Raw Spaces remain unavailable because extensions cannot create an
+incognito browser context equivalent to CDP `Target.createBrowserContext`.
+Closing a Raw session only detaches the debugger; it does not close the browser.
 
-The bridge supports `/json/list`, `/json/new`, `/json/activate/{tabId}`, and
-`/json/close/{tabId}` plus page and browser WebSocket endpoints. The browser
-endpoint accepts general CDP methods, flattened Target sessions, and target
-lifecycle events. Edge still decides whether a particular protocol command is
-valid for privileged `edge://` pages, file URLs without extension file access,
-and other protected targets.
+The bridge supports `/json/version`, `/json/protocol`, `/json/list`,
+`/json/new`, `/json/activate/{tabId}`, `/json/close/{tabId}`, and
+`/json/restore` plus page and browser WebSocket endpoints. The browser endpoint
+accepts general CDP methods, flattened Target sessions, and target lifecycle
+events. The browser still decides whether a particular protocol command is
+valid for privileged `edge://` / `chrome://` pages, file URLs without extension
+file access, and other protected targets.
+
+Host logs are written to `~/.raw/edge-bridge.log` or
+`~/.raw/chrome-bridge.log`; set `RAW_BRIDGE_LOG=0` to disable them.
 
 ## Rollback
 
-Remove `mode: "edge-extension"` from `current.json` to return to the selected
-dedicated profile. Disable or remove **Raw Edge Bridge** from
-`edge://extensions` and remove the per-user registry key:
+Remove `mode` from `current.json` to return to the selected dedicated profile.
+Disable or remove **Raw Browser Bridge** from the browser's extensions page and
+remove the per-user registry keys:
 
 ```text
 HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.raw.edge_bridge
+HKCU\Software\Google\Chrome\NativeMessagingHosts\com.raw.edge_bridge
 ```
