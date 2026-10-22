@@ -23,6 +23,7 @@
       discarded: tab.discarded === true,
       status: tab.status ?? "complete",
       windowId: tab.windowId,
+      favIconUrl: tab.favIconUrl ?? "",
     };
   }
 
@@ -69,7 +70,22 @@
             new Promise((_, reject) => setTimeout(() => reject(new Error(`debugger attach timed out on tab ${tabId}`)), 5000))
           ]);
         } catch (error) {
-          if (!String(error?.message ?? error).includes("already attached")) throw error;
+          const message = String(error?.message ?? error);
+          if (/another debugger is already attached/i.test(message)) {
+            // It may be our own attachment left behind by a previous service
+            // worker lifetime. Detach (which only affects this extension) and
+            // make one clean attempt before blaming someone else.
+            try {
+              await chromeApi.debugger.detach({ tabId });
+              await chromeApi.debugger.attach({ tabId }, "1.3");
+              attachedTabs.add(tabId);
+              return tabId;
+            } catch {
+              attachedTabs.delete(tabId);
+              throw new Error(`another debugger is already attached to tab ${tabId}; close DevTools or the other extension and retry`);
+            }
+          }
+          if (!/already attached/i.test(message)) throw error;
         }
         attachedTabs.add(tabId);
         return tabId;
@@ -105,7 +121,7 @@
       const tab = await tabFor(payload);
       const tabId = await ensureAttached(tab.id);
       
-      const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : 5000;
+      const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : 30_000;
       return await new Promise((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
@@ -169,11 +185,18 @@
           return { targetInfo: { ...targetInfo(tab), attached: attachedTabs.has(tab.id) } };
         }
         case "Target.createTarget": {
+          if (params.browserContextId) {
+            throw new Error("isolated browser contexts are unavailable in extension mode");
+          }
           const tab = await chromeApi.tabs.create({ url: params.url || "about:blank", active: params.background !== true });
           return { targetId: String(tab.id) };
         }
         case "Target.closeTarget": {
-          const tab = await tabFor(params);
+          const explicit = params.targetId ?? params.tabId ?? params.sessionId;
+          if (explicit === undefined || explicit === null || explicit === "") {
+            throw new Error("Target.closeTarget requires targetId");
+          }
+          const tab = await chromeApi.tabs.get(tabIdFrom(explicit));
           await chromeApi.tabs.remove(tab.id);
           attachedTabs.delete(tab.id);
           return { success: true };
@@ -204,17 +227,19 @@
         case "Target.getBrowserContexts":
           return { browserContextIds: [] };
         case "Target.createBrowserContext":
-          throw new Error("isolated browser contexts are unavailable in Edge extension mode");
+          throw new Error("isolated browser contexts are unavailable in extension mode");
         case "Target.disposeBrowserContext":
           return {};
-        case "Browser.getVersion":
+        case "Browser.getVersion": {
+          const brand = (root.navigator?.userAgentData?.brands ?? []).find((item) => /Edge|Chrome/i.test(item.brand));
           return {
             protocolVersion: "1.3",
-            product: `Microsoft Edge/${root.navigator?.userAgentData?.brands?.find((x) => /Edge/i.test(x.brand))?.version ?? "extension"}`,
+            product: `${brand?.brand ?? "Chromium"}/${brand?.version ?? "extension"}`,
             revision: "",
             userAgent: root.navigator?.userAgent ?? "",
             jsVersion: "",
           };
+        }
         case "Browser.getWindowForTarget": {
           const tab = await tabFor(params);
           const win = await chromeApi.windows.get(tab.windowId);
@@ -236,7 +261,10 @@
           return {};
         }
         case "Browser.setDownloadBehavior":
-          return {};
+          // Edge extensions cannot choose the profile's download directory.
+          // Downloads still work; they land in the browser's configured
+          // folder and are reported through Browser.download* events.
+          return { supported: false };
         case "Browser.cancelDownload":
           await chromeApi.downloads.cancel(Number(params.guid));
           return {};
@@ -363,6 +391,9 @@
         }
         case "Raw.setExtensionEnabled": {
           if (!params.id) throw new Error("Raw.setExtensionEnabled needs an extension id");
+          if (params.id === chromeApi.runtime.id) {
+            throw new Error("refusing to disable the Raw Browser Bridge itself");
+          }
           const enabled = params.enabled !== false;
           await chromeApi.management.setEnabled(params.id, enabled);
           return { ok: true, id: params.id, enabled };
@@ -393,10 +424,17 @@
           });
           return { ok: true, tabId: tab.id };
         }
-        case "Browser.close": {
+        case "Browser.close":
+          // Standard Browser.close takes no confirmation and would close every
+          // window in the user's real profile. Require an explicit opt-in.
+          throw new Error("Browser.close is disabled in extension mode; call Raw.closeBrowser with { confirm: true } or close tabs individually");
+        case "Raw.closeBrowser": {
+          if (params.confirm !== true) {
+            throw new Error("Raw.closeBrowser requires { confirm: true }");
+          }
           const windows = await chromeApi.windows.getAll({ windowTypes: ["normal"] });
           for (const win of windows) await chromeApi.windows.remove(win.id);
-          return {};
+          return { ok: true, windows: windows.length };
         }
         default:
           // chrome.debugger exposes all protocol domains supported by the

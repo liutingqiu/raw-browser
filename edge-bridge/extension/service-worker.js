@@ -4,6 +4,7 @@ importScripts("bridge-core.js");
 
 let nativePort;
 let reconnectTimer;
+let reconnectDelay = 1000;
 const bridge = RawEdgeBridgeCore.createBridgeExecutor(chrome);
 
 /**
@@ -38,10 +39,14 @@ function dropPort(port) {
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
+  const delay = reconnectDelay;
+  // Exponential backoff: a missing or crashing host used to be relaunched
+  // once per second forever.
+  reconnectDelay = Math.min(Math.round(reconnectDelay * 1.8), 30_000);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = undefined;
     connect();
-  }, 1000);
+  }, delay + Math.floor(Math.random() * 250));
 }
 
 function connect() {
@@ -61,7 +66,18 @@ function connect() {
     dropPort(port);
     scheduleReconnect();
   });
-  post({ kind: "hello", extensionId: chrome.runtime.id, version: chrome.runtime.getManifest().version });
+  // A port that survives this long did reach a working host; failures that
+  // happen immediately keep backing off.
+  setTimeout(() => {
+    if (nativePort === port) reconnectDelay = 1000;
+  }, 5000);
+  post({
+    kind: "hello",
+    extensionId: chrome.runtime.id,
+    version: chrome.runtime.getManifest().version,
+    protocolVersion: "1",
+    userAgent: navigator.userAgent,
+  });
 }
 
 // The host process only lives while a native port is open, and an idle service
@@ -78,6 +94,11 @@ async function handleNativeMessage(message) {
   try {
     const result = await bridge.execute(message);
     post({ kind: "response", requestId: message.requestId, ok: true, result: result ?? {} });
+    try {
+      await emitLifecycleEvents(message);
+    } catch (error) {
+      post({ kind: "bridgeWarning", message: String(error?.message ?? error) });
+    }
   } catch (error) {
     post({
       kind: "response",
@@ -88,11 +109,48 @@ async function handleNativeMessage(message) {
   }
 }
 
+/**
+ * Target discovery/auto-attach also apply to tabs that were already open when
+ * the client asked. Real CDP delivers those as lifecycle events; without this
+ * a browser-level client sees an empty target list until the next tab opens.
+ */
+async function emitLifecycleEvents(message) {
+  const method = message.payload?.method;
+  const params = message.payload?.params ?? {};
+  if (method === "Target.setDiscoverTargets" && params.discover === true) {
+    const tabs = await bridge.execute({ op: "listTabs", payload: {} });
+    for (const tab of tabs ?? []) {
+      post({ kind: "browserEvent", method: "Target.targetCreated", params: { targetInfo: RawEdgeBridgeCore.targetInfo(tab) } });
+    }
+  }
+  if (method === "Target.setAutoAttach" && params.autoAttach === true) {
+    const tabs = await bridge.execute({ op: "listTabs", payload: {} });
+    for (const tab of tabs ?? []) {
+      try {
+        await bridge.ensureAttached(tab.id);
+        post({
+          kind: "browserEvent",
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: RawEdgeBridgeCore.sessionIdFor(tab.id),
+            targetInfo: { ...RawEdgeBridgeCore.targetInfo(tab), attached: true },
+            waitingForDebugger: false,
+          },
+        });
+      } catch (error) {
+        post({ kind: "bridgeWarning", message: String(error?.message ?? error) });
+      }
+    }
+  }
+}
+
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId) return;
-  post({ kind: "event", tabId: source.tabId, method, params: params ?? {} });
+  // One frame carries both identities; the host fans it out to page and
+  // browser sockets. The old version sent the same payload twice.
   post({
-    kind: "browserSessionEvent",
+    kind: "event",
+    tabId: source.tabId,
     sessionId: RawEdgeBridgeCore.sessionIdFor(source.tabId),
     method,
     params: params ?? {},
@@ -105,7 +163,11 @@ chrome.debugger.onDetach.addListener((source) => {
   post({
     kind: "browserEvent",
     method: "Target.detachedFromTarget",
-    params: { sessionId: RawEdgeBridgeCore.sessionIdFor(source.tabId), targetId: String(source.tabId) },
+    params: {
+      sessionId: RawEdgeBridgeCore.sessionIdFor(source.tabId),
+      targetId: String(source.tabId),
+      reason: source.reason,
+    },
   });
 });
 
