@@ -43,6 +43,22 @@ jobs:
       - run: npm ci
       - run: npm run smoke:browser
 
+  bridge-host:
+    timeout-minutes: 10
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: npm ci
+      - run: dotnet build edge-bridge/host/RawEdgeBridge.csproj -c Release --nologo
+      - run: node scripts/smoke-bridge.mjs
+
   dependency-audit:
     timeout-minutes: 5
     runs-on: ubuntu-latest

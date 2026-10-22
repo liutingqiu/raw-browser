@@ -1,46 +1,47 @@
-# raw-agent (raw)
+# raw-browser (raw)
 
 专为大模型与自动化 Agent 设计的轻量级浏览器自动化运行时与 CLI 工具，支持通过 Chrome DevTools Protocol (CDP) 及原生扩展桥深度调度 Chrome 与 Microsoft Edge。
 
 [![Node.js: >=22.21.0](https://img.shields.io/badge/Node.js-%3E%3D22.21.0-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests: 41 Passed](https://img.shields.io/badge/Tests-41%20Passed-success.svg)]()
+[![Tests: 51 Passed](https://img.shields.io/badge/Tests-51%20Passed-success.svg)]()
 
 ---
 
-## 1. 什么是 raw-agent？
+## 1. 什么是 raw-browser？
 
-`raw-agent` (`raw`) 是一个极简、高性能的浏览器自动化核心引擎。它在自动化 Agent 与真实用户浏览器（Chrome / Edge）之间建立低延迟通道，提供细粒度的 DOM 元素操作、无障碍可访问性快照（Accessibility Snapshot）、Cookie 与本地存储读写、网络代理调度以及真实的鼠标键盘硬件事件模拟。
+`raw-browser` (`raw`) 是一个极简、高性能的浏览器自动化核心引擎。它在自动化 Agent 与真实用户浏览器（Chrome / Edge）之间建立低延迟通道，提供细粒度的 DOM 元素操作、无障碍可访问性快照（Accessibility Snapshot）、Cookie 与本地存储读写、网络代理调度以及真实的鼠标键盘硬件事件模拟。
 
 ## 2. 定位与支持范围
 
 - **专注浏览器自动化**：本项目完全聚焦于浏览器驱动与控制。历史版本中的终端 TUI、模型提供商配置及通用对话循环已彻底从本仓库剥离，保持纯粹的自动化内核。
 - **双模桥接架构**：
-  - **原生 Chrome/Edge CDP 模式**：直连通过 `--remote-debugging-port` 启动的 Chromium 实例（默认端口 `9333`）。
-  - **Edge 扩展桥模式 (`edge-bridge/`)**：通过 Native Messaging 主机与专用扩展驱动用户本机的真实 Edge 浏览器会话，免去空白 Profile 无法复用登录态的痛点。
+  - **原生 Chrome/Edge CDP 模式**：直连通过 `--remote-debugging-port` 启动的 Chromium 实例（默认端口 `9222`）。
+  - **扩展桥模式 (`edge-bridge/`)**：通过 Native Messaging 主机与专用扩展驱动用户本机的真实 Chrome 或 Edge 会话，免去空白 Profile 无法复用登录态的痛点。Edge 使用 `9333`，Chrome 使用 `9334`。
 
 ---
 
 ## 3. 架构与桥接工作机制
 
-### Edge 原生扩展桥工作流程
+### 原生扩展桥工作流程
 
 ```text
-Node.js (raw CLI / Agent)
+Node.js (raw CLI / Agent / MCP)
        │
-       ▼ (CDP / WebSocket :9333)
+       ▼ (CDP / WebSocket :9333 Edge, :9334 Chrome)
 Native Host (edge-bridge/host/Program.cs - 标准 I/O)
        │
        ▼ (Native Messaging 原生消息协议)
-Edge MV3 扩展 (edge-bridge/extension/)
+MV3 扩展 (edge-bridge/extension/)
        │
        ▼ (chrome.debugger + chrome.cookies + chrome.tabs APIs)
-用户原生浏览器 Profile (Microsoft Edge)
+用户原生浏览器 Profile (Microsoft Edge 或 Google Chrome)
 ```
 
-1. **Native Host 宿主进程**：C# 编写的高性能宿主程序 (`RawEdgeBridge.exe`)，通过标准输入输出与浏览器进行原生消息通信。
-2. **Edge 浏览器扩展**：基于 `chrome.debugger` API 动态挂载到目标标签页，桥接 CDP 方法并调用完整的扩展能力（标签页、Cookie、代理、下载拦截、脚本注入）。
-3. **本地回环服务**：Native Host 在本地回环地址 `127.0.0.1:9333` 暴露 WebSocket 调试端口，供 `raw` 运行时免配置直连并进行令牌校验。
+1. **Native Host 宿主进程**：C# 编写的高性能宿主程序 (`raw-edge-bridge.exe` / `raw-chrome-bridge.exe`)，通过标准输入输出与浏览器进行原生消息通信。
+2. **浏览器扩展**：基于 `chrome.debugger` API 动态挂载到目标标签页，桥接 CDP 方法并调用完整的扩展能力（标签页、Cookie、代理、下载拦截、脚本注入）。
+3. **本地回环服务**：Native Host 在本地回环地址暴露 WebSocket 调试端口，供 `raw` 运行时免配置直连并进行令牌校验。Edge 与 Chrome 使用独立端口和令牌文件（`edge-bridge.json` / `chrome-bridge.json`）。
+4. **版本协商**：扩展在 `hello` 中上报版本、协议版本与 User-Agent；宿主在 `/json/version` 中返回并记录不匹配。
 
 ---
 
@@ -55,7 +56,7 @@ Edge MV3 扩展 (edge-bridge/extension/)
 ## 5. 安全限制与防护设计
 
 - **智能输入适配**：`setValue` 内置对 Monaco Editor、CodeMirror 5/6 及 React 受控组件的原生 Setter 检测与驱动，防止直接执行危险脚本注入。
-- **上下文隔离 (`space`)**：支持命名空间隔离（`--space <name>`），为并发任务提供独立的 Cookie、缓存与本地存储环境。
+- **上下文隔离 (`space`)**：支持命名空间隔离（`--space <name>`），为并发任务提供独立的 Cookie、缓存与本地存储环境。该能力仅限直连 CDP 模式；扩展无法创建等价的隔离上下文。
 - **凭据与敏感信息隔离**：桥接连接令牌、调试配置及临时目录保存在用户本地目录（`~/.raw/`），严格排除在代码版本库之外。
 
 ---
@@ -69,13 +70,37 @@ Edge MV3 扩展 (edge-bridge/extension/)
 
 ### 构建步骤
 ```bash
-git clone https://github.com/liutingqiu/raw-agent.git
-cd raw-agent
+git clone https://github.com/liutingqiu/raw-browser.git
+cd raw-browser
 
 npm install
 npm run typecheck
 npm run build
 ```
+
+### 安装扩展桥
+
+```powershell
+# 默认同时安装 Edge 与 Chrome；也可用 -Browser edge 或 -Browser chrome
+powershell -ExecutionPolicy Bypass -File scripts/install-edge-bridge.ps1 -Browser both
+```
+
+安装脚本会发布原生宿主、生成独立的 `~/.raw/edge-bridge.json` 与
+`~/.raw/chrome-bridge.json` 令牌、为两个浏览器注册 Native Messaging 主机，并输出扩展路径和 ID。
+
+在每个需要驱动的浏览器中加载一次解压扩展：
+
+1. 打开 `edge://extensions` 或 `chrome://extensions`；
+2. 开启「开发人员模式」；
+3. 选择「加载解压缩的扩展」，指向 `edge-bridge/extension`。
+
+然后在 `~/.raw/browser-profiles/current.json` 中选择桥：
+
+```json
+{ "mode": "edge-extension" }
+```
+
+或 `{ "mode": "chrome-extension" }`。`raw status` 会显示当前桥、端口和扩展版本。
 
 ---
 
@@ -106,7 +131,7 @@ console.log(snapshot);
 ### 常用选项参数
 - `--headless`：以无界面模式启动。
 - `--space <name>`：在隔离的上下文会话中运行。
-- `--port <N>`：CDP 监听端口（默认 `9333`）。
+- `--port <N>`：CDP 监听端口（默认 `9222` 直连、`9333` Edge 桥、`9334` Chrome 桥）。
 - `--profile <path>`：指定持久化浏览器 Profile 目录。
 - `--timeout-ms <N>`：脚本执行超时时间（毫秒）。
 - `--downloads <path>`：指定下载文件保存目录。
@@ -120,7 +145,7 @@ console.log(snapshot);
 # 1. TypeScript 类型检查
 npm run typecheck
 
-# 2. 运行 41 项单元测试
+# 2. 运行 51 项单元测试
 npm test
 
 # 3. 编译发布包
@@ -138,6 +163,9 @@ npm run check
 ## 9. 已知限制
 
 1. **扩展桥安装自动化**：标准 CDP 模式支持跨平台（Windows / macOS / Linux），但原生消息扩展桥的自动注册安装脚本目前主要面向 Windows PowerShell (`scripts/install-edge-bridge.ps1`)。
+2. **单调试器限制**：Chrome 与 Edge 对同一标签页只允许一个 CDP 调试器客户端；并发挂载会导致后挂载者被分离。
+3. **扩展桥不支持隔离 Space**：扩展无法创建 `Target.createBrowserContext` 等价物，`--space` 仅在直连 CDP 模式可用。
+4. **浏览器更新**：Chromium 大版本更新可能改变原生调试行为或权限提示。
 2. **单调试器互斥**：Chromium 内核规定同一个标签页同一时刻仅允许挂载一个调试客户端。若与其他外部调试工具并发挂载，将触发 Detach 事件。
 3. **浏览器主版本升级**：Chromium 大版本升级偶尔会导致内部私有调试签名或权限提示变动，需重启浏览器重新激活桥接。
 

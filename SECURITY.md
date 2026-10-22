@@ -7,20 +7,25 @@ Security fixes are applied to the latest release.
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting for this repository:
-<https://github.com/liutingqiu/raw-agent/security/advisories/new>.
+<https://github.com/liutingqiu/raw-browser/security/advisories/new>.
 
 Include the affected version, operating system, reproduction steps, impact, and any suggested fix.
 Do not include secrets or account data. Please avoid filing a public issue until a fix is available.
 
 ## Trust model
 
-`raw` intentionally executes model-generated shell commands and browser scripts with the current
-user's operating-system permissions. The `ask` and `readonly` permission modes control tool calls;
-they are user controls rather than an operating-system sandbox. Dedicated file tools enforce the
-workspace boundary unless `RAW_ALLOW_OUTSIDE=1` is set. Shell and browser tools are not confined to
-that boundary.
+`raw` intentionally executes model-generated browser scripts with the current user's operating-system
+permissions. The worker used for timeouts isolates CPU-bound scripts; it is not a security sandbox.
+The extension bridge runs with the browser's full extension authority (`<all_urls>`, `debugger`,
+cookies, proxy, downloads, history, management), and plain CDP mode controls a dedicated browser
+profile. The calling agent's prompt and permission mode are the authority for which actions run.
 
-Configuration, conversation history, recent image attachments, notes, downloads, and the dedicated
-browser profile are stored locally in the raw data directory. Remote page and search content is
-untrusted input to the model and can influence subsequent tool calls; use `ask` or `readonly` when
-reviewing content that should not be allowed to trigger state changes automatically.
+The bridge is defended at the transport boundary: listeners bind only to `127.0.0.1`, every HTTP and
+WebSocket request requires a per-browser random token, native messaging is restricted to the pinned
+extension id, and a host only attaches to a debug port it owns. Cookies, tokens and page contents are
+secrets; do not log or forward them to external services.
+
+Configuration, downloads, bridge tokens and the dedicated browser profile are stored locally under
+`~/.raw/`. Remote page content is untrusted input to the model and can influence subsequent tool
+calls; use the calling agent's permission mode when reviewing content that should not trigger state
+changes automatically.

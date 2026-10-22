@@ -1,20 +1,29 @@
 {
-  "name": "raw-agent",
-  "version": "0.4.0",
-  "description": "A browser-only automation runtime for Chrome and Edge.",
+  "name": "raw-browser",
+  "version": "0.5.0",
+  "description": "A browser-only automation runtime and native bridge for Chrome and Edge.",
   "keywords": [
     "ai",
     "agent",
     "browser-automation",
-    "cdp"
+    "cdp",
+    "chrome",
+    "edge"
   ],
   "license": "MIT",
   "type": "module",
   "bin": {
-    "raw": "dist/browser-cli.js"
+    "raw": "dist/browser-cli.js",
+    "raw-bridge": "scripts/raw-bridge.mjs"
   },
   "files": [
     "dist",
+    "scripts",
+    "mcp",
+    "edge-bridge/extension",
+    "edge-bridge/host/Program.cs",
+    "edge-bridge/host/RawEdgeBridge.csproj",
+    "edge-bridge/README.md",
     "README.md",
     "README.zh-CN.md",
     "CHANGELOG.md",
@@ -35,16 +44,17 @@
     "dev": "node src/browser-cli.ts",
     "test": "node --no-warnings --test",
     "smoke:browser": "npm run build && node scripts/smoke-browser.mjs",
+    "smoke:bridge": "npm run build && node scripts/smoke-bridge.mjs",
     "browser": "node src/browser-cli.ts"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/liutingqiu/raw-agent.git"
+    "url": "git+https://github.com/liutingqiu/raw-browser.git"
   },
   "bugs": {
-    "url": "https://github.com/liutingqiu/raw-agent/issues"
+    "url": "https://github.com/liutingqiu/raw-browser/issues"
   },
-  "homepage": "https://github.com/liutingqiu/raw-agent#readme",
+  "homepage": "https://github.com/liutingqiu/raw-browser#readme",
   "devDependencies": {
     "@types/node": "^22.20.2",
     "typescript": "^7.0.2"
