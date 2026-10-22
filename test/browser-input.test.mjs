@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 
-import { interpolatePath, modifierMask, readBridgeConfig } from "../src/browser.ts";
+import { interpolatePath, keyParams, modifierMask, normalizeUrl, readBridgeConfig } from "../src/browser.ts";
 
 const repo = path.resolve(import.meta.dirname, "..");
 const helpersSource = fs.readFileSync(path.join(repo, "src", "page-helpers.js"), "utf8");
@@ -281,6 +281,85 @@ test("setValue reports a miss instead of silently succeeding", () => {
   assert.match(result.detail, /element not found/);
 });
 
+test("setValue omits change events when notifyChange is false", () => {
+  const { mai, state, makeElement } = loadHelpers();
+  const el = makeElement({ tagName: "INPUT" });
+  state.matched = [el];
+
+  const result = mai.setValue("css=#name", "quiet", { notifyChange: false });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(el.events.map((event) => event.type), ["input"]);
+});
+
+test("setValue appends to a Monaco editor through getValue", () => {
+  const { mai, window, state, makeElement } = loadHelpers();
+  const el = makeElement();
+  state.matched = [el];
+  const written = [];
+  window.monaco = {
+    editor: {
+      getEditors: () => [{ getDomNode: () => el, getValue: () => "old", setValue: (text) => written.push(text) }],
+    },
+  };
+
+  const result = mai.setValue("css=#code", "-new", { append: true });
+
+  assert.equal(result.strategy, "monaco");
+  assert.deepEqual(written, ["old-new"]);
+});
+
+test("setValue refuses a file input and points at setInputFiles", () => {
+  const { mai, state, makeElement } = loadHelpers();
+  const el = makeElement({ tagName: "INPUT", type: "file" });
+  state.matched = [el];
+
+  const result = mai.setValue("css=#upload", "C:/fixture.txt");
+
+  assert.equal(result.ok, false);
+  assert.equal(result.strategy, "file-input");
+  assert.match(result.detail, /setInputFiles/);
+});
+
+/* --------------------------- URL and keys --------------------------- */
+
+test("normalizeUrl leaves explicit schemes untouched", () => {
+  assert.equal(normalizeUrl("file:///C:/fixture.html"), "file:///C:/fixture.html");
+  assert.equal(normalizeUrl("about:blank"), "about:blank");
+  assert.equal(normalizeUrl("data:text/html,x"), "data:text/html,x");
+  assert.equal(normalizeUrl("edge://version/"), "edge://version/");
+  assert.equal(normalizeUrl("example.com"), "https://example.com");
+  assert.equal(normalizeUrl(""), "about:blank");
+});
+
+test("keyParams canonicalizes modifiers and named keys", () => {
+  const command = keyParams("Cmd+A");
+  assert.equal(command.modifiers, 4);
+  assert.equal(command.key, "a");
+  assert.equal(command.code, "KeyA");
+
+  const enter = keyParams("enter");
+  assert.equal(enter.key, "Enter");
+  assert.equal(enter.code, "Enter");
+
+  const shifted = keyParams("Shift+1");
+  assert.equal(shifted.modifiers & 8, 8);
+  assert.equal(shifted.key, "!");
+  assert.equal(shifted.code, "Digit1");
+
+  const bang = keyParams("!");
+  assert.equal(bang.key, "!");
+  assert.equal(bang.code, "Digit1");
+  assert.equal(bang.modifiers & 8, 8);
+});
+
+test("keyParams uses the physical letter code without inventing Shift", () => {
+  const upper = keyParams("A");
+  assert.equal(upper.key, "a");
+  assert.equal(upper.modifiers & 8, 0);
+  assert.equal(upper.code, "KeyA");
+});
+
 /* --------------------------- bridge config --------------------------- */
 
 const bridgeDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "raw-bridge-test-"));
@@ -355,4 +434,13 @@ test("interpolatePath clamps the step count and always yields the target last", 
   assert.equal(interpolatePath({ x: 0, y: 0 }, { x: 100, y: 0 }, 500).length, 200);
   assert.equal(interpolatePath({ x: 0, y: 0 }, { x: 100, y: 0 }, 0).length, 1);
   assert.deepEqual(interpolatePath({ x: 4, y: 9 }, { x: 40, y: 90 }, 0), [{ x: 40, y: 90 }]);
+});
+
+test("readBridgeConfig reads the chrome config and tolerates a BOM", () => {
+  const dir = bridgeDir();
+  fs.writeFileSync(path.join(dir, "chrome-bridge.json"), "﻿" + JSON.stringify({ token: "chrome-token", port: 9334 }));
+
+  assert.deepEqual({ ...readBridgeConfig(dir, "chrome-bridge.json") }, { token: "chrome-token", port: 9334 });
+
+  fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -23,7 +23,17 @@
     if (r.width < 1 || r.height < 1) return false;
     const view = el.ownerDocument && el.ownerDocument.defaultView;
     const s = (view || window).getComputedStyle(el);
-    if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return false;
+    if (s.visibility === 'hidden' || s.visibility === 'collapse' || s.display === 'none' || Number(s.opacity) === 0) return false;
+    // Ancestors can hide a child that still has a non-zero box. Walk up,
+    // crossing a shadow boundary through the host element.
+    let node = el.parentElement || (el.parentNode && el.parentNode.host) || null;
+    while (node && node.nodeType === 1) {
+      const parentStyle = (view || window).getComputedStyle(node);
+      if (parentStyle.display === 'none' || parentStyle.visibility === 'hidden' || parentStyle.visibility === 'collapse' || Number(parentStyle.opacity) === 0) {
+        return false;
+      }
+      node = node.parentElement || (node.parentNode && node.parentNode.host) || null;
+    }
     let win = el.ownerDocument && el.ownerDocument.defaultView;
     while (win && win !== window) {
       const frame = win.frameElement;
@@ -37,7 +47,6 @@
     'a,button,input,textarea,select,[role=button],[role=link],[role=checkbox],[role=tab],[role=textbox],[onclick],[contenteditable=true]';
   const TEXTY = 'a,button,[role=button],[role=link],input,textarea,li,span,div,h1,h2,h3,label,td,p';
 
-  const TEXT_RE = null; // replaced by explicit parsing below
   const ROLE_RE = /^role=([a-z]+)(?:\[name[*^$]?=["']?([^"']+)["']?\])?$/i;
 
   /** "text=Foo" / ":has-text(\"Foo\")" -> the needle, else null */
@@ -88,18 +97,40 @@
     return out;
   };
 
-  const queryAll = (selector) => documents().flatMap((doc) => {
-    try {
-      return [...doc.querySelectorAll(selector)];
-    } catch {
-      return [];
-    }
-  });
+  /**
+   * Every element matching the selector, including open shadow roots.
+   * querySelectorAll alone stops at a shadow boundary, which is where most
+   * modern component libraries keep their controls.
+   */
+  const queryAll = (selector) => {
+    const out = [];
+    const visit = (root) => {
+      try {
+        out.push(...root.querySelectorAll(selector));
+      } catch {
+        /* invalid selector in this root */
+      }
+      let hosts = [];
+      try {
+        hosts = root.querySelectorAll('*');
+      } catch {
+        return;
+      }
+      for (const host of hosts) {
+        if (host.shadowRoot) visit(host.shadowRoot);
+      }
+    };
+    for (const doc of documents()) visit(doc);
+    return out;
+  };
+
+  /** element references handed out by snapshot(), kept out of the DOM */
+  const refs = new Map();
 
   /** every locator syntax: number | css | css= | xpath= | text= | :has-text() | role= */
   const findAll = (sel) => {
-    if (typeof sel === 'number') {
-      const el = queryAll('[data-mai="' + sel + '"]')[0];
+    if (typeof sel === 'number' || (typeof sel === 'string' && /^\d+$/.test(sel.trim()) && !sel.includes('='))) {
+      const el = refs.get(Number(sel));
       return el ? [el] : [];
     }
     if (sel === undefined || sel === null || sel === '') return [];
@@ -173,16 +204,25 @@
   };
   const rect = (el) => absoluteRect(el, true);
 
-  /** interactive elements from a document and its same-origin iframes */
-  const collect = (doc, out) => {
+  /** interactive elements from a document and its same-origin frames/shadow roots */
+  const collect = (root, out) => {
     try {
-      out.push(...doc.querySelectorAll(INTERACTIVE));
+      out.push(...root.querySelectorAll(INTERACTIVE));
     } catch {
       /* cross-origin document */
     }
+    let hosts = [];
+    try {
+      hosts = root.querySelectorAll('*');
+    } catch {
+      hosts = [];
+    }
+    for (const host of hosts) {
+      if (host.shadowRoot) collect(host.shadowRoot, out);
+    }
     let frames = [];
     try {
-      frames = [...doc.querySelectorAll('iframe,frame')];
+      frames = [...root.querySelectorAll('iframe,frame')];
     } catch {
       /* ignore */
     }
@@ -210,7 +250,10 @@
     };
 
     const lines = [];
+    // Remove indices left by an older build; numbering now lives in `refs`
+    // so snapshotting never mutates the page's DOM or trips its observers.
     queryAll('[data-mai]').forEach((e) => e.removeAttribute('data-mai'));
+    refs.clear();
     lines.push('# ' + (document.title || '').replace(/\s+/g, ' ').trim());
     lines.push('# ' + location.href);
     lines.push('# scope=' + scope + (opts.root ? ' root=' + opts.root : ''));
@@ -223,8 +266,9 @@
       if (!visible(el) || !inViewport(el)) continue;
       const tag = el.tagName.toLowerCase();
       const type = el.getAttribute('type');
-      el.setAttribute('data-mai', String(i));
-      lines.push('[' + i + '] ' + tag + (type ? ':' + type : '') + ' "' + textOf(el).slice(0, 120) + '"');
+      const index = i;
+      refs.set(index, el);
+      lines.push('[' + index + '] ' + tag + (type ? ':' + type : '') + ' "' + textOf(el).slice(0, 120) + '"');
       if (++i >= max) {
         lines.push('(element list truncated at ' + max + ')');
         break;
@@ -247,7 +291,16 @@
     visible: visible(el),
     box: (() => {
       const r = absoluteRect(el, false);
-      return { x: Math.round(r.x - r.w / 2), y: Math.round(r.y - r.h / 2), w: Math.round(r.w), h: Math.round(r.h) };
+      // x/y stay center points (what mouseMove/click expect); left/top are
+      // the unambiguous corners.
+      return {
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        left: Math.round(r.x - r.w / 2),
+        top: Math.round(r.y - r.h / 2),
+        width: Math.round(r.w),
+        height: Math.round(r.h),
+      };
     })(),
   });
 
@@ -296,7 +349,13 @@
       const elContains = typeof el.contains === 'function' ? (node) => el.contains(node) : () => false;
       return dom === el || domContains(el) || elContains(dom);
     });
-    if (owner) return { kind: 'monaco', write: (text) => owner.setValue(text) };
+    if (owner) {
+      return {
+        kind: 'monaco',
+        read: () => { try { return owner.getValue ? owner.getValue() : ''; } catch { return ''; } },
+        write: (text) => owner.setValue(text),
+      };
+    }
     const focused = editors.find((instance) => {
       try {
         return typeof instance.hasTextFocus === 'function' && instance.hasTextFocus();
@@ -304,7 +363,13 @@
         return false;
       }
     });
-    if (focused) return { kind: 'monaco-focused', write: (text) => focused.setValue(text) };
+    if (focused) {
+      return {
+        kind: 'monaco-focused',
+        read: () => { try { return focused.getValue ? focused.getValue() : ''; } catch { return ''; } },
+        write: (text) => focused.setValue(text),
+      };
+    }
 
     // Only fall back to a lone (or unidentifiable) editor when the target
     // really is part of one. Without this guard a page that happens to hold a
@@ -318,8 +383,14 @@
       el.classList.contains('inputarea');
     if (!insideEditor && !hostsEditor && !isMonacoInput) return null;
 
-    if (editors.length === 1) return { kind: 'monaco-single', write: (text) => editors[0].setValue(text) };
-    return { kind: 'monaco-ambiguous', count: editors.length, write: null };
+    if (editors.length === 1) {
+      return {
+        kind: 'monaco-single',
+        read: () => { try { return editors[0].getValue ? editors[0].getValue() : ''; } catch { return ''; } },
+        write: (text) => editors[0].setValue(text),
+      };
+    }
+    return { kind: 'monaco-ambiguous', count: editors.length, write: null, read: null };
   };
 
   const codeMirror5For = (el) => {
@@ -368,10 +439,20 @@
     const el = find(sel);
     if (!el) return { ok: false, strategy: 'none', detail: 'element not found: ' + String(sel) };
 
+    const tag = (el.tagName || '').toLowerCase();
+    const inputType = String(el.type || (el.getAttribute && el.getAttribute('type')) || '').toLowerCase();
+    if (tag === 'input' && inputType === 'file') {
+      return { ok: false, strategy: 'file-input', detail: 'file inputs must be written with setInputFiles()' };
+    }
+
     const monaco = monacoFor(el);
     if (monaco && monaco.write) {
-      monaco.write(text);
-      return { ok: true, strategy: monaco.kind, length: text.length };
+      let next = text;
+      if (opts.append && typeof monaco.read === 'function') {
+        try { next = String(monaco.read() || '') + text; } catch { next = text; }
+      }
+      monaco.write(next);
+      return { ok: true, strategy: monaco.kind, length: next.length };
     }
     if (monaco && monaco.kind === 'monaco-ambiguous') {
       return {
@@ -383,14 +464,22 @@
 
     const cm5 = codeMirror5For(el);
     if (cm5) {
-      cm5.setValue(text);
-      return { ok: true, strategy: 'codemirror5', length: text.length };
+      let next = text;
+      if (opts.append) {
+        try { next = String(cm5.getValue ? cm5.getValue() : '') + text; } catch { next = text; }
+      }
+      cm5.setValue(next);
+      return { ok: true, strategy: 'codemirror5', length: next.length };
     }
 
     const cm6 = codeMirror6For(el);
     if (cm6) {
-      cm6.dispatch({ changes: { from: 0, to: cm6.state.doc.length, insert: text } });
-      return { ok: true, strategy: 'codemirror6', length: text.length };
+      const current = cm6.state && cm6.state.doc && typeof cm6.state.doc.toString === 'function'
+        ? cm6.state.doc.toString()
+        : '';
+      const next = opts.append ? current + text : text;
+      cm6.dispatch({ changes: { from: 0, to: cm6.state.doc.length, insert: next } });
+      return { ok: true, strategy: 'codemirror6', length: next.length };
     }
 
     el.scrollIntoView({ block: 'center' });
@@ -398,17 +487,22 @@
 
     if (el.isContentEditable) {
       const doc = el.ownerDocument;
+      const current = String(el.innerText || el.textContent || '');
+      const next = opts.append ? current + text : text;
       let replaced = false;
       try {
-        replaced = selectAllContents(el, doc) && doc.execCommand('insertText', false, text);
+        replaced = selectAllContents(el, doc) && doc.execCommand('insertText', false, next);
       } catch {
         replaced = false;
       }
       if (!replaced) {
-        el.textContent = text;
+        el.textContent = next;
         el.dispatchEvent(new Event('input', { bubbles: true }));
       }
-      return { ok: true, strategy: 'contenteditable', length: text.length };
+      if (opts.notifyChange !== false) {
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return { ok: true, strategy: 'contenteditable', length: next.length };
     }
 
     const current = 'value' in el ? String(el.value === undefined || el.value === null ? '' : el.value) : '';
@@ -421,7 +515,7 @@
       ? new InputEventCtor('input', { bubbles: true, data: text, inputType: 'insertText' })
       : new Event('input', { bubbles: true });
     el.dispatchEvent(inputEvent);
-    if (opts.append !== true || opts.notifyChange !== false) {
+    if (opts.notifyChange !== false) {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }
     return { ok: true, strategy: 'input', length: next.length };
