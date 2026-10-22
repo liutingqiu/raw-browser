@@ -65,9 +65,7 @@ const script = `
   await page.click("role=button[name=Go]");
   const hit = await page.eval("document.querySelector('iframe').contentDocument.body.dataset.hit");
   if (hit !== "1") throw new Error("iframe click did not land");
-  const waiting = page.waitForDownload({ timeoutMs: 20000 });
-  await page.click("#download");
-  const downloaded = await waiting;
+  const downloaded = await page.waitForDownload(() => page.click("#download"), { timeoutMs: 20000 });
   if (downloaded.bytes !== 16) throw new Error("download size mismatch: " + downloaded.bytes);
   if (!downloaded.id) throw new Error("download result has no id for cancelDownload");
   const shot = await page.screenshot();

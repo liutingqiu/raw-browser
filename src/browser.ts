@@ -534,8 +534,20 @@ async function ensureBrowserCdp(): Promise<Cdp> {
     });
   });
   cdp.on("Browser.downloadProgress", (p) => {
-    const d = downloads.get(p.guid);
-    if (!d) return;
+    let d = downloads.get(p.guid);
+    if (!d) {
+      // A progress event without a matching begin event still describes a
+      // real download; synthesize the record rather than losing it.
+      d = {
+        guid: p.guid,
+        url: "",
+        filename: p.filePath ? path.basename(p.filePath) : "download",
+        state: "inProgress",
+        bytes: 0,
+        done: false,
+      };
+      downloads.set(p.guid, d);
+    }
     d.state = p.state ?? d.state;
     d.bytes = p.receivedBytes ?? d.bytes;
     if (p.filePath) d.path = p.filePath;
@@ -1790,10 +1802,22 @@ class PageHandle {
     }));
   }
 
-  /** wait for a download started after this call to finish, then return its path */
-  async waitForDownload(opts: { timeoutMs?: number } = {}) {
+  /**
+   * Wait for a download started after this call to finish, then return its
+   * path. Prefer the action form: it arms the browser-level listener before
+   * the click, so a fast download cannot start before the events are wired up.
+   *
+   *   await page.waitForDownload(() => page.click("#export"))
+   */
+  async waitForDownload(
+    actionOrOpts: (() => Promise<unknown>) | { timeoutMs?: number } = {},
+    maybeOpts: { timeoutMs?: number } = {},
+  ) {
     await ensureBrowserCdp();
+    const action = typeof actionOrOpts === "function" ? actionOrOpts : undefined;
+    const opts = typeof actionOrOpts === "function" ? maybeOpts : actionOrOpts;
     const before = new Set(downloads.keys());
+    if (action) await action();
     const deadline = Date.now() + (opts.timeoutMs ?? 60_000);
     while (Date.now() < deadline) {
       const fresh = [...downloads.values()].filter((d) => !before.has(d.guid));
@@ -1805,7 +1829,14 @@ class PageHandle {
       }
       await new Promise((r) => setTimeout(r, 200));
     }
-    throw new Error("no download finished in time");
+    const seen = [...downloads.values()].map((d) => `${d.filename}:${d.state}`);
+    let files: string[] = [];
+    try {
+      files = fs.readdirSync(DOWNLOAD_DIR).slice(0, 20);
+    } catch {
+      /* directory may not exist */
+    }
+    throw new Error(`no download finished in time (records=${JSON.stringify(seen)}, files=${JSON.stringify(files)})`);
   }
 
   /**

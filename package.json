@@ -1,6 +1,6 @@
 {
   "name": "raw-browser",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A browser-only automation runtime and native bridge for Chrome and Edge.",
   "keywords": [
     "ai",

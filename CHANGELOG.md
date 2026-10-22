@@ -3,6 +3,21 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [0.5.1] - 2026-10-22
+
+### Added
+
+- The extension toolbar popup reports bridge status and offers a Disconnect /
+  Reconnect switch, backed by `chrome.storage` so the pause survives a service
+  worker restart.
+
+### Fixed
+
+- `page.waitForDownload(action, opts)` arms the browser-level listener before
+  the action runs, eliminating the race where a fast download completed before
+  `Browser.downloadWillBegin` was wired up. Progress events now also synthesize
+  a record when the begin event was missed.
+
 ## [0.5.0] - 2026-10-22
 
 ### Added
@@ -121,6 +136,7 @@ follow Semantic Versioning.
 - Strict TypeScript checking, a locked development toolchain, and full CLI protocol, setup, and permission smoke tests now gate publication.
 - Browser smoke testing uses a disposable profile and covers forms, iframes, downloads, screenshots, isolated spaces, cleanup, and CPU timeouts.
 
-[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.5.1
 [0.5.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.5.0
 [0.4.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.4.0
