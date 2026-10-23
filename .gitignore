@@ -21,3 +21,11 @@ edge-bridge/host/bin/
 edge-bridge/host/obj/
 edge-bridge/extension.pem
 edge-bridge/extension.crx
+
+# generated demo frames and release artifacts
+demo/.frames/
+*.tgz
+host-out/
+host-pack/
+raw-bridge-host-win-x64.zip
+SHA256SUMS.txt

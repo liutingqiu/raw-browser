@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>raw-browser social card</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Inter, Roboto, sans-serif;
+    background:
+      radial-gradient(900px 500px at 88% 8%, rgba(37, 99, 235, .38), transparent 62%),
+      radial-gradient(700px 420px at 8% 100%, rgba(16, 185, 129, .16), transparent 60%),
+      #0b1220;
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    padding: 64px 72px;
+    gap: 56px;
+  }
+  .left { width: 560px; flex: none; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 34px; }
+  .mark {
+    width: 40px; height: 40px; border-radius: 12px; background: #2563eb;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 17px; letter-spacing: -.05em;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), 0 10px 24px -10px rgba(37,99,235,.9);
+  }
+  .brand b { font-size: 19px; letter-spacing: -.02em; font-weight: 650; }
+  .brand span { color: #64748b; font-weight: 500; }
+  h1 {
+    margin: 0 0 20px;
+    font-size: 60px;
+    line-height: 1.02;
+    letter-spacing: -.045em;
+    font-weight: 750;
+  }
+  h1 em { font-style: normal; color: #60a5fa; }
+  p {
+    margin: 0 0 28px;
+    font-size: 21px;
+    line-height: 1.45;
+    color: #94a3b8;
+    max-width: 520px;
+  }
+  .pills { display: flex; gap: 10px; flex-wrap: wrap; }
+  .pill {
+    font-size: 13px; font-weight: 600; color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, .28);
+    background: rgba(148, 163, 184, .08);
+    padding: 7px 12px; border-radius: 999px;
+  }
+  .url {
+    margin-top: 42px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 15px; color: #7dd3fc;
+  }
+  .code {
+    flex: 1;
+    background: rgba(15, 23, 42, .78);
+    border: 1px solid rgba(148, 163, 184, .2);
+    border-radius: 20px;
+    box-shadow: 0 40px 90px -30px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255,255,255,.05);
+    overflow: hidden;
+  }
+  .bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 14px 18px; border-bottom: 1px solid rgba(148,163,184,.14);
+    color: #64748b; font-size: 12px; font-family: ui-monospace, Consolas, monospace;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #334155; }
+  .bar span { margin-left: 8px; }
+  pre {
+    margin: 0; padding: 26px 28px 30px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 16px; line-height: 1.85; color: #cbd5e1; white-space: pre-wrap;
+  }
+  .kw { color: #c084fc; }
+  .fn { color: #60a5fa; }
+  .str { color: #86efac; }
+  .num { color: #fbbf24; }
+  .cmt { color: #475569; }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="brand">
+      <span class="mark">raw</span>
+      <b>raw-browser</b><span>/ browser automation</span>
+    </div>
+    <h1>Your browser.<br /><em>One script.</em></h1>
+    <p>A zero-dependency browser automation runtime, CLI and MCP server for AI agents. Drives the Chrome or Edge you're already signed into.</p>
+    <div class="pills">
+      <span class="pill">MIT</span>
+      <span class="pill">Node 22+</span>
+      <span class="pill">Chrome &amp; Edge</span>
+      <span class="pill">MCP server</span>
+      <span class="pill">51 tests</span>
+    </div>
+    <div class="url">github.com/liutingqiu/raw-browser</div>
+  </div>
+  <div class="code">
+    <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>demo.mjs</span></div>
+    <pre><span class="kw">const</span> snap = <span class="kw">await</span> page.<span class="fn">snapshot</span>();
+<span class="kw">await</span> page.<span class="fn">click</span>(<span class="str">'#12'</span>);
+<span class="kw">await</span> page.<span class="fn">fill</span>(<span class="str">'role=textbox'</span>, <span class="str">'Initech'</span>);
+
+<span class="kw">const</span> file = <span class="kw">await</span> page.<span class="fn">waitForDownload</span>(() =&gt;
+  page.<span class="fn">click</span>(<span class="str">'#export'</span>));
+<span class="cmt">// orders.csv · 66 bytes · one round-trip</span></pre>
+  </div>
+</body>
+</html>

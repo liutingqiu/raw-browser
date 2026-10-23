@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const HELP = `raw - browser plugin runtime
+const HELP = `raw - browser automation runtime
 
 Usage:
   raw status

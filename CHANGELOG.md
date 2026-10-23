@@ -3,6 +3,45 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- `page.on(event, listener)` subscribes to a tab's CDP events from a script and
+  returns an unsubscribe function.
+- Zero-SDK bridge install: when the .NET 9 SDK is missing,
+  `scripts/install-edge-bridge.ps1` downloads the matching prebuilt
+  `raw-bridge-host-win-x64.zip` from GitHub Releases and verifies
+  `SHA256SUMS.txt` when present. `-HostPath` and `-BuildFromSource` cover local
+  hosts and forced builds, and `-CleanLegacyHosts` removes old timestamped
+  installs after a browser restart.
+- The bridge host now installs to the stable path
+  `~/.raw/edge-bridge/current/` and upgrades replace its files in place. Edge
+  and Chrome cache the resolved native-messaging path for the life of the
+  browser process, so the previous `host-<timestamp>` layout could leave
+  reconnects pointing at a deleted binary after an upgrade.
+- `.github/workflows/release.yml` builds a self-contained single-file host,
+  publishes checksums and uploads the npm tarball on tag pushes.
+- `docs/API.md`: the full scripting reference (locators, input, waits,
+  downloads, browser surfaces, spaces, escape hatches).
+- Runnable demo: `demo/dashboard.html`, `demo/example.mjs`, `scripts/demo.mjs`,
+  generated `assets/demo.gif` / `assets/demo.mp4`, and `assets/social-card.png`.
+
+### Changed
+
+- README and README.zh-CN lead with a quick start and a demo, document the
+  prebuilt-host install path, and link the API reference.
+- npm metadata now includes MCP/browser keywords, funding, `publishConfig`, and
+  ships `docs/`, `demo/` and `assets/`.
+
+### Fixed
+
+- README.zh-CN duplicated two known-limitation entries.
+- CONTRIBUTING still referred to provider model lists from the removed chat CLI.
+- The source-build install path now publishes a self-contained single-file host
+  instead of a framework-dependent build, so the bridge keeps working without
+  the .NET runtime installed.
+
 ## [0.5.1] - 2026-10-22
 
 ### Added

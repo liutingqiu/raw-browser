@@ -28,6 +28,17 @@ jobs:
       - run: npm run check
       - name: the published entry point must boot
         run: node dist/browser-cli.js --help
+      - name: parse the bridge installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "scripts/install-edge-bridge.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
       - name: verify the package manifest and tarball
         run: npm pack --dry-run
 

@@ -2,7 +2,8 @@
 
 Raw Browser Bridge lets Raw drive ordinary tabs in the user's real Microsoft
 Edge or Google Chrome Default profile. Authentication remains inside the
-browser; the bridge does not copy, decrypt, export, or log cookies.
+browser: the bridge does not copy, decrypt or log cookies on its own, and cookie
+values are returned only when a script explicitly calls a cookie API.
 
 ## Components
 
@@ -38,10 +39,25 @@ paused, the extension keeps no native port and cannot be driven remotely;
 & .\scripts\install-edge-bridge.ps1 -Browser chrome
 ```
 
-Open `edge://extensions` and/or `chrome://extensions`, enable Developer mode,
-choose **Load unpacked**, and select `edge-bridge\extension`. The extension ID
-must be `gfpadofoapicldopjkghnfbnbkljihmk`; the installer verifies the manifest
-key before registering anything.
+The installer builds a self-contained host when the .NET 9 SDK is on `PATH`.
+Without the SDK it downloads `raw-bridge-host-win-x64.zip` from the matching
+GitHub release and verifies `SHA256SUMS.txt` when present. To use a host you
+built yourself, pass `-HostPath C:\path\to\raw-edge-bridge.exe`; to force a
+local build, pass `-BuildFromSource`. `-PreferPrebuilt` downloads the release
+asset even when an SDK is installed.
+
+The host lives at `~/.raw/edge-bridge/current/`. Upgrades replace the two
+executables in place, because a running Edge or Chrome caches the resolved
+native-messaging path for the life of the browser process. If you upgraded from
+an installer that used `host-<timestamp>` directories, the browser may keep
+using one of those until it restarts; restart it, then run the installer once
+with `-CleanLegacyHosts` to remove the old directories.
+
+Load the unpacked extension once in each browser you want to drive: open
+`edge://extensions` and/or `chrome://extensions`, enable Developer mode, choose
+**Load unpacked**, and select `edge-bridge\extension`. The extension ID must be
+`gfpadofoapicldopjkghnfbnbkljihmk`; the installer verifies the manifest key
+before registering anything.
 
 Load unpacked is the only install that survives a browser restart. Both
 `--load-extension=...` and the CDP `Extensions.loadUnpacked` call load the

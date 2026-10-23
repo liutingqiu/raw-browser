@@ -1255,6 +1255,15 @@ class PageHandle {
     return this.ensureHelpers().then(() => this.evaluate(js));
   }
 
+  /**
+   * Subscribe to a CDP event on this tab, e.g. Page.screencastFrame or
+   * Network.responseReceived. Returns an unsubscribe function. Listener
+   * errors are isolated by the transport and never break later listeners.
+   */
+  on(event: string, cb: (params: any) => void): () => void {
+    return this.cdp.on(event, cb);
+  }
+
   /** element description for one locator, or null */
   async find(selector: string | number) {
     await this.ensureHelpers();

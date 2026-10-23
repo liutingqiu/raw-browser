@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Acme Ops — Orders</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --bg: #eef2f9;
+    --card: #ffffff;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --green: #059669;
+    --green-soft: #d1fae5;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --gray-soft: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Inter, Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 80% -10%, #dbeafe 0%, transparent 60%), var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .frame {
+    max-width: 1120px;
+    min-height: calc(100vh - 56px);
+    margin: 28px auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px -24px rgba(15, 23, 42, .35), 0 2px 8px rgba(15, 23, 42, .04);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 24px;
+    background: linear-gradient(90deg, #0f172a, #1e293b);
+    color: #f8fafc;
+  }
+  .mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: #2563eb;
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: -.04em;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+  }
+  .brand { font-weight: 650; letter-spacing: -.01em; }
+  .brand span { color: #94a3b8; font-weight: 500; }
+  .topbar .spacer { flex: 1; }
+  .live {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 600; color: #bbf7d0;
+    background: rgba(16, 185, 129, .14);
+    border: 1px solid rgba(16, 185, 129, .35);
+    padding: 6px 11px; border-radius: 999px;
+  }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: #34d399; display: block; }
+  .body { padding: 28px 32px 22px; flex: 1; }
+  .head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 22px; }
+  .head h1 { margin: 0; font-size: 30px; letter-spacing: -.03em; }
+  .head p { margin: 0 0 4px; color: var(--muted); font-size: 14px; }
+  .head .spacer { flex: 1; }
+  .count { font-size: 13px; color: var(--muted); }
+  .count b { color: var(--ink); }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
+  .search {
+    flex: 1;
+    position: relative;
+  }
+  .search svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); opacity: .45; }
+  .search input {
+    width: 100%; height: 42px; padding: 0 14px 0 40px;
+    border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe;
+    font-size: 14px; color: var(--ink); outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .search input:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); background: #fff; }
+  select {
+    height: 42px; padding: 0 34px 0 13px; border: 1px solid var(--line); border-radius: 10px;
+    background: #fbfcfe url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+    font-size: 14px; color: var(--ink); appearance: none; outline: none;
+  }
+  select:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+  button.primary {
+    height: 42px; padding: 0 18px; border: 0; border-radius: 10px; cursor: pointer;
+    background: var(--blue); color: #fff; font-size: 14px; font-weight: 600;
+    box-shadow: 0 8px 18px -8px rgba(37, 99, 235, .8);
+    transition: transform .12s, background .12s, box-shadow .12s;
+    white-space: nowrap;
+  }
+  button.primary:hover { background: #1d4ed8; transform: translateY(-1px); }
+  button.primary:active { transform: translateY(0); box-shadow: 0 4px 10px -6px rgba(37,99,235,.8); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead th {
+    text-align: left; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); font-weight: 650; padding: 10px 12px; border-bottom: 1px solid var(--line);
+  }
+  tbody td { padding: 13px 12px; border-bottom: 1px solid #f1f5f9; }
+  tbody tr { cursor: pointer; transition: background .12s; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody tr.selected { background: var(--blue-soft); }
+  tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--blue); }
+  .mono { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+  .amount { font-weight: 600; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 999px;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
+  .paid { color: var(--green); background: var(--green-soft); }
+  .pending { color: var(--amber); background: var(--amber-soft); }
+  .refunded { color: #475569; background: var(--gray-soft); }
+  .empty { padding: 34px 12px; text-align: center; color: var(--muted); display: none; }
+  .foot {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 32px 18px; color: var(--muted); font-size: 12px;
+  }
+  .foot .spacer { flex: 1; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11.5px;
+    background: #0f172a; color: #cbd5e1; padding: 7px 11px; border-radius: 8px;
+  }
+  .chip b { color: #93c5fd; font-weight: 600; }
+  .toast {
+    position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 18px);
+    background: #0f172a; color: #f8fafc; padding: 12px 18px; border-radius: 12px;
+    font-size: 13.5px; box-shadow: 0 18px 40px -16px rgba(15,23,42,.6);
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast .tick {
+    width: 18px; height: 18px; border-radius: 50%; background: #10b981;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: #052e16; font-weight: 900;
+  }
+  /* demo cursor overlay */
+  #cursor {
+    position: fixed; left: 0; top: 0; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+    border-radius: 50%; background: rgba(37, 99, 235, .9);
+    border: 3px solid #fff; box-shadow: 0 4px 14px rgba(15, 23, 42, .35), 0 0 0 1px rgba(37,99,235,.35);
+    pointer-events: none; z-index: 9999; opacity: 0;
+    transition: transform .14s cubic-bezier(.2,.8,.2,1), opacity .2s;
+  }
+  #cursor.on { opacity: 1; }
+  .ripple {
+    position: fixed; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
+    border: 2px solid rgba(37, 99, 235, .8); pointer-events: none; z-index: 9998;
+    animation: ripple .5s ease-out forwards;
+  }
+  @keyframes ripple {
+    0% { transform: scale(.6); opacity: .9; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="topbar">
+      <span class="mark">raw</span>
+      <span class="brand">Acme Ops <span>/ Orders</span></span>
+      <span class="spacer"></span>
+      <span class="live"><i></i> live</span>
+    </div>
+
+    <div class="body">
+      <div class="head">
+        <div>
+          <h1>Orders</h1>
+          <p>One script. Search, select, export.</p>
+        </div>
+        <span class="spacer"></span>
+        <span class="count"><b id="visible">8</b> of 8 orders</span>
+      </div>
+
+      <div class="toolbar">
+        <label class="search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f172a" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+          <input id="search" type="text" placeholder="Search orders" autocomplete="off" spellcheck="false" />
+        </label>
+        <select id="status" aria-label="Status">
+          <option value="">All statuses</option>
+          <option value="Paid">Paid</option>
+          <option value="Pending">Pending</option>
+          <option value="Refunded">Refunded</option>
+        </select>
+        <button class="primary" id="export">Export CSV</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty">No orders match this filter.</div>
+    </div>
+
+    <div class="foot">
+      <span class="chip"><b>raw</b> run demo.mjs</span>
+      <span>1 script &middot; 6 actions &middot; 0 model round-trips</span>
+      <span class="spacer"></span>
+      <span>127.0.0.1 demo</span>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"><span class="tick">✓</span><span id="toast-text">Exported</span></div>
+  <div id="cursor"></div>
+
+<script>
+  const DATA = [
+    { id: '1042', customer: 'Acme Corp',        amount: 1240.00, status: 'Paid',     date: 'Oct 21' },
+    { id: '1043', customer: 'Globex',           amount:  860.00, status: 'Pending',  date: 'Oct 21' },
+    { id: '1044', customer: 'Initech',          amount: 2310.00, status: 'Paid',     date: 'Oct 20' },
+    { id: '1045', customer: 'Umbrella Group',   amount:  540.00, status: 'Refunded', date: 'Oct 20' },
+    { id: '1046', customer: 'Hooli',            amount: 1790.00, status: 'Paid',     date: 'Oct 19' },
+    { id: '1047', customer: 'Stark Industries', amount: 3420.00, status: 'Pending',  date: 'Oct 19' },
+    { id: '1048', customer: 'Wayne Enterprises',amount:  980.00, status: 'Paid',     date: 'Oct 18' },
+    { id: '1049', customer: 'Cyberdyne',        amount: 1150.00, status: 'Paid',     date: 'Oct 18' }
+  ];
+
+  const rowsEl = document.getElementById('rows');
+  const emptyEl = document.getElementById('empty');
+  const visibleEl = document.getElementById('visible');
+  const searchEl = document.getElementById('search');
+  const statusEl = document.getElementById('status');
+  const toastEl = document.getElementById('toast');
+  const toastText = document.getElementById('toast-text');
+  let selected = null;
+
+  const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const slug = (s) => s.toLowerCase();
+
+  function render() {
+    const q = slug(searchEl.value.trim());
+    const status = statusEl.value;
+    const list = DATA.filter((o) =>
+      (!status || o.status === status) &&
+      (!q || o.id.includes(q) || slug(o.customer).includes(q) || slug(o.status).includes(q))
+    );
+    rowsEl.innerHTML = list.map((o) => `
+      <tr data-id="${o.id}" class="${selected === o.id ? 'selected' : ''}">
+        <td class="mono">#${o.id}</td>
+        <td>${o.customer}</td>
+        <td class="mono amount">${money(o.amount)}</td>
+        <td><span class="pill ${o.status.toLowerCase()}">${o.status}</span></td>
+        <td class="mono">${o.date}</td>
+      </tr>`).join('');
+    emptyEl.style.display = list.length ? 'none' : 'block';
+    visibleEl.textContent = String(list.length);
+    for (const tr of rowsEl.querySelectorAll('tr')) {
+      tr.addEventListener('click', () => {
+        selected = selected === tr.dataset.id ? null : tr.dataset.id;
+        render();
+        if (selected) toast(`Order #${selected} selected`);
+      });
+    }
+  }
+
+  let toastTimer;
+  function toast(message) {
+    toastText.textContent = message;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+  }
+
+  searchEl.addEventListener('input', render);
+  statusEl.addEventListener('change', render);
+
+  document.getElementById('export').addEventListener('click', () => {
+    const q = slug(searchEl.value.trim());
+    const status = statusEl.value;
+    const list = DATA.filter((o) =>
+      (!status || o.status === status) &&
+      (!q || o.id.includes(q) || slug(o.customer).includes(q) || slug(o.status).includes(q))
+    );
+    const csv = ['order,customer,amount,status,date']
+      .concat(list.map((o) => `${o.id},${o.customer},${o.amount.toFixed(2)},${o.status},${o.date}`))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'orders.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast(`Exported ${list.length} order${list.length === 1 ? '' : 's'} to orders.csv`);
+  });
+
+  const cursorEl = document.getElementById('cursor');
+  window.__demoCursor = (x, y) => {
+    cursorEl.classList.add('on');
+    cursorEl.style.transform = `translate(${x}px, ${y}px)`;
+  };
+  window.__demoClick = (x, y) => {
+    window.__demoCursor(x, y);
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    r.style.left = x + 'px';
+    r.style.top = y + 'px';
+    document.body.appendChild(r);
+    setTimeout(() => r.remove(), 520);
+  };
+
+  render();
+</script>
+</body>
+</html>

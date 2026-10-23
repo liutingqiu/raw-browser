@@ -1,16 +1,28 @@
 {
   "name": "raw-browser",
   "version": "0.5.1",
-  "description": "A browser-only automation runtime and native bridge for Chrome and Edge.",
+  "description": "Drive the Chrome or Edge you're already signed into from one script — a zero-dependency browser automation runtime, CLI and MCP server for AI agents.",
   "keywords": [
     "ai",
+    "ai-agents",
     "agent",
+    "automation",
+    "browser",
     "browser-automation",
     "cdp",
     "chrome",
-    "edge"
+    "chrome-devtools-protocol",
+    "chrome-extension",
+    "edge",
+    "mcp",
+    "mcp-server"
   ],
   "license": "MIT",
+  "author": "liutingqiu",
+  "funding": {
+    "type": "individual",
+    "url": "https://paypal.me/tianqi689"
+  },
   "type": "module",
   "bin": {
     "raw": "dist/browser-cli.js",
@@ -20,6 +32,9 @@
     "dist",
     "scripts",
     "mcp",
+    "docs",
+    "demo",
+    "assets",
     "edge-bridge/extension",
     "edge-bridge/host/Program.cs",
     "edge-bridge/host/RawEdgeBridge.csproj",
@@ -34,10 +49,14 @@
   "engines": {
     "node": ">=22.21.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "node --no-warnings scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && npm run build && node scripts/smoke-browser.mjs",
+    "check": "node scripts/check-versions.mjs && npm run typecheck && npm test && npm run build && node scripts/smoke-browser.mjs",
+    "check:versions": "node scripts/check-versions.mjs",
     "prepublishOnly": "npm run check",
     "prepack": "node --no-warnings scripts/build.mjs",
     "start": "node src/browser-cli.ts",
@@ -45,7 +64,9 @@
     "test": "node --no-warnings --test",
     "smoke:browser": "npm run build && node scripts/smoke-browser.mjs",
     "smoke:bridge": "npm run build && node scripts/smoke-bridge.mjs",
-    "browser": "node src/browser-cli.ts"
+    "browser": "node src/browser-cli.ts",
+    "demo": "npm run build && node scripts/demo.mjs",
+    "social-card": "npm run build && node scripts/render-social-card.mjs"
   },
   "repository": {
     "type": "git",

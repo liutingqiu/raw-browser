@@ -22,8 +22,9 @@ profile. The calling agent's prompt and permission mode are the authority for wh
 
 The bridge is defended at the transport boundary: listeners bind only to `127.0.0.1`, every HTTP and
 WebSocket request requires a per-browser random token, native messaging is restricted to the pinned
-extension id, and a host only attaches to a debug port it owns. Cookies, tokens and page contents are
-secrets; do not log or forward them to external services.
+extension id, and a host only attaches to a debug port it owns. Release host binaries are published
+with `SHA256SUMS.txt`; `scripts/install-edge-bridge.ps1` verifies the checksum when it downloads one.
+Cookies, tokens and page contents are secrets; do not log or forward them to external services.
 
 Configuration, downloads, bridge tokens and the dedicated browser profile are stored locally under
 `~/.raw/`. Remote page content is untrusted input to the model and can influence subsequent tool
