@@ -43,9 +43,9 @@ and `SHA256SUMS.txt`, packs the npm tarball, and optionally publishes to npm.
    ```
 
 5. The workflow creates the GitHub release and uploads the host archive,
-   checksums and npm tarball. To publish to npm automatically, add an
-   `NPM_TOKEN` repository secret (`npm token create`); otherwise download the
-   tarball from the release and run `npm publish`.
+   checksums and npm tarball. To publish to npm automatically, set the
+   repository variable `NPM_AUTOPUBLISH` to `true` and add a valid `NPM_TOKEN`
+   repository secret; otherwise publish manually with `npm publish`.
 
 6. Upload `assets/social-card.png` as the repository social preview in GitHub
    settings if the card changed. GitHub has no API for that image.
