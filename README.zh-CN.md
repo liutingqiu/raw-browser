@@ -23,31 +23,29 @@
 需要 **Node.js 22.21+**，以及 Chrome 或 Edge。
 
 ```bash
+npm install -g raw-browser
+raw status
+raw run -e "const p = await page.newTab('https://example.com'); console.log(await p.title()); await p.closeTab()"
+```
+
+直连 CDP 模式下，首次运行会在 `~/.raw/` 下启动一个专用浏览器 profile，并在
+多次运行之间保留，登录状态不会丢。
+
+或者从源码安装：
+
+```bash
 git clone https://github.com/liutingqiu/raw-browser.git
 cd raw-browser
 npm install
 npm run build
-
-node dist/browser-cli.js status
-node dist/browser-cli.js run -e "const p = await page.newTab('https://example.com'); console.log(await p.title()); await p.closeTab()"
-```
-
-直连 CDP 模式下，首次运行会在 `~/.raw/` 下启动一个专用浏览器 profile，并在
-多次运行之间保留，登录状态不会丢。想把 `raw` 加到 PATH：
-
-```bash
 npm link
 raw status
 ```
 
-只想要 CLI 和直连 CDP 模式？每个 Release 还附了一个稳定命名的 tarball：
-
-```bash
-npm install -g https://github.com/liutingqiu/raw-browser/releases/latest/download/raw-browser.tgz
-raw status
-```
-
-扩展桥最好从克隆仓库安装，因为安装脚本依赖仓库里的 `edge-bridge/` 目录结构。
+需要固定版本或离线安装时，可以用每个
+[Release](https://github.com/liutingqiu/raw-browser/releases/latest) 附带的
+`raw-browser.tgz`。扩展桥安装脚本在 npm 包和克隆仓库里都有；全局安装时用
+`$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1` 运行。
 
 ## 为什么是 raw-browser
 
@@ -142,7 +140,10 @@ Cookie API 时才会返回 Cookie 值。
 桥接安装脚本目前是 Windows PowerShell；直连 CDP 模式支持 Windows / macOS / Linux。
 
 ```powershell
-# Edge + Chrome；只装一个用 -Browser edge 或 -Browser chrome
+# 全局 npm 安装
+powershell -ExecutionPolicy Bypass -File "$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1" -Browser both
+
+# 源码克隆
 powershell -ExecutionPolicy Bypass -File scripts/install-edge-bridge.ps1 -Browser both
 ```
 
@@ -157,7 +158,8 @@ Native Messaging 宿主。没有 .NET 9 SDK 时，它会从
 
 1. 打开 `edge://extensions` 或 `chrome://extensions`；
 2. 开启「开发人员模式」；
-3. 选择「加载解压缩的扩展」，指向 `edge-bridge/extension`。
+3. 选择「加载解压缩的扩展」，指向安装器输出的 `ExtensionPath`
+   （克隆仓库里是 `edge-bridge/extension`）。
 
 在 `~/.raw/browser-profiles/current.json` 中选择桥：
 

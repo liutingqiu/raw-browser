@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 
-const string Version = "0.5.1";
+const string Version = "0.6.0";
 
 var processName = Process.GetCurrentProcess().ProcessName;
 string? forcedBrowser = Environment.GetEnvironmentVariable("RAW_BRIDGE_BROWSER");

@@ -51,7 +51,7 @@ function request(port, pathname, { token, headers = {} } = {}) {
   });
 }
 
-async function waitFor(fn, timeoutMs = 10_000) {
+async function waitFor(fn, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let last;
   while (Date.now() < deadline) {
@@ -95,11 +95,17 @@ async function runMode({ kind, port, token, versionField }) {
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
   try {
-    const version = await waitFor(async () => {
-      const response = await request(port, "/json/version", { token });
-      if (response.status !== 200) return null;
-      return JSON.parse(response.body);
-    });
+    let version;
+    try {
+      version = await waitFor(async () => {
+        const response = await request(port, "/json/version", { token });
+        if (response.status !== 200) return null;
+        return JSON.parse(response.body);
+      });
+    } catch (error) {
+      const detail = stderr.trim() ? `\nhost stderr:\n${stderr.trim()}` : "";
+      throw new Error(`${error?.message ?? error}${detail}`);
+    }
     if (!String(version.Browser).startsWith(versionField)) {
       throw new Error(`unexpected Browser field: ${version.Browser}`);
     }

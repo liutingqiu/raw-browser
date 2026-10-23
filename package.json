@@ -1,6 +1,6 @@
 {
   "name": "raw-browser",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Drive the Chrome or Edge you're already signed into from one script — a zero-dependency browser automation runtime, CLI and MCP server for AI agents.",
   "keywords": [
     "ai",
