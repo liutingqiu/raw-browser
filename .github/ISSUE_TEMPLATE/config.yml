@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/liutingqiu/raw-browser/security/advisories/new
+    about: Please report vulnerabilities privately instead of opening a public issue.
+  - name: Scripting API reference
+    url: https://github.com/liutingqiu/raw-browser/blob/main/docs/API.md
+    about: Locators, input, waits, downloads, browser surfaces and escape hatches.

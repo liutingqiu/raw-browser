@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in the runtime, CLI, MCP server or bridge is not working.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove cookies, tokens and private page
+        content from logs and screenshots before posting.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the command or script you ran, and the full error.
+      placeholder: |
+        Command / script:
+        Expected:
+        Actual:
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Direct CDP
+        - Extension bridge (Edge)
+        - Extension bridge (Chrome)
+        - MCP server
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: raw-version
+    attributes:
+      label: raw version
+      description: The `raw status` output or `package.json` version.
+      placeholder: "0.5.1"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version, browser and browser version.
+      placeholder: "Windows 11, Node 24.4.0, Edge 140"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Bridge logs live at `~/.raw/edge-bridge.log` and
+        `~/.raw/chrome-bridge.log`. Strip tokens and cookies first.
+      render: text
+    validations:
+      required: false

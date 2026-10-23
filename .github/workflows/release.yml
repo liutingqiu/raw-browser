@@ -1,0 +1,95 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - run: npm ci
+      - run: node scripts/check-versions.mjs --tag ${{ github.ref_name }}
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: publish the self-contained bridge host
+        shell: pwsh
+        run: |
+          dotnet publish edge-bridge/host/RawEdgeBridge.csproj -c Release -r win-x64 `
+            --self-contained true -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true -o host-out --nologo
+
+      - name: pack the host and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path host-pack -Force | Out-Null
+          Copy-Item host-out/raw-edge-bridge.exe host-pack/raw-edge-bridge.exe -Force
+          Compress-Archive -Path host-pack/raw-edge-bridge.exe -DestinationPath raw-bridge-host-win-x64.zip -Force
+          $hash = (Get-FileHash raw-bridge-host-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  raw-bridge-host-win-x64.zip" | Set-Content SHA256SUMS.txt -Encoding ascii
+
+      - name: pack the npm tarball
+        run: npm pack
+
+      - name: add a stable tarball name
+        shell: pwsh
+        run: |
+          $tarball = (Get-ChildItem *.tgz | Select-Object -First 1).Name
+          Copy-Item $tarball raw-browser.tgz -Force
+
+      - name: create the release and upload assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "raw-browser $tag" --generate-notes
+          }
+          $tarball = (Get-ChildItem *.tgz | Select-Object -First 1).Name
+          gh release upload $tag raw-bridge-host-win-x64.zip SHA256SUMS.txt $tarball raw-browser.tgz --clobber
+
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Set an NPM_TOKEN repository secret to publish automatically. Without
+      # it the step is skipped and the tarball remains on the GitHub release.
+      - name: publish to npm
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        run: npm publish --ignore-scripts --provenance --access public
