@@ -260,6 +260,17 @@ GitHub 私有漏洞报告。
 
 如果 raw-browser 帮你省下了几次模型往返，点个 star 能让更多人看到它。
 
+## 致谢
+
+raw-browser 的 API 与产品思路受到这些先行项目的影响：
+
+- [Playwright](https://github.com/microsoft/playwright)（Apache-2.0）：其
+  locator 与自动等待模型影响了 `page.*` 的设计。
+- [ego-lite](https://github.com/CitroLabs/ego-lite)（MIT）：其“共享浏览器中的
+  隔离 Space”和“把已登录 profile 交给 Agent”的思路影响了隔离设计。
+
+raw-browser 是直接基于 Chrome DevTools Protocol 的独立实现，不依赖上述项目。
+
 ## 开源许可
 
 [MIT](LICENSE)

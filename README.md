@@ -277,6 +277,18 @@ vulnerability reporting as described in [SECURITY.md](SECURITY.md).
 If raw-browser saves you a few model round-trips, a star helps other people find
 it.
 
+## Acknowledgements
+
+raw-browser's API and product ideas were informed by prior work:
+
+- [Playwright](https://github.com/microsoft/playwright) (Apache-2.0), whose
+  locator and auto-waiting model shaped the `page.*` API.
+- [ego-lite](https://github.com/CitroLabs/ego-lite) (MIT), whose shared-browser
+  Spaces and signed-in-profile model informed the isolation design.
+
+raw-browser is an independent implementation built directly on the Chrome
+DevTools Protocol. It does not list either project as a dependency.
+
 ## License
 
 [MIT](LICENSE)
