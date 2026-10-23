@@ -41,7 +41,7 @@ function readConfig() {
     parsed = JSON.parse(fs.readFileSync(CONFIG, "utf8").replace(/^﻿/, ""));
   } catch {
     throw new Error(
-      `no bridge config at ${CONFIG}. Install the extension bridge first (see scripts/install-edge-bridge.ps1).`,
+      `no bridge config at ${CONFIG}. Install the extension bridge first (see scripts/install-edge-bridge.mjs).`,
     );
   }
   if (typeof parsed.token !== "string" || parsed.token.length === 0) {

@@ -45,7 +45,8 @@ raw status
 Pinned or offline installs can use the `raw-browser.tgz` tarball attached to each
 [release](https://github.com/liutingqiu/raw-browser/releases/latest). The
 extension bridge installer ships in both the npm package and a clone; a global
-install runs it with `$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1`.
+install runs it with
+`node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs"`.
 
 ## Why raw-browser
 
@@ -145,23 +146,43 @@ returned only when a script explicitly calls a cookie API.
 
 ## Drive your signed-in browser
 
-The bridge installer is currently Windows PowerShell. Direct CDP mode works on
-Windows, macOS and Linux.
+The bridge installer supports Windows, macOS and Linux. Direct CDP mode also
+works on all three.
+
+```bash
+# global npm install (macOS / Linux)
+node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs" --browser both
+
+# source checkout (any platform)
+node scripts/install-edge-bridge.mjs --browser both
+```
+
+On Windows the same Node command delegates to the PowerShell installer. You can
+also run that script directly:
 
 ```powershell
-# global npm install
 powershell -ExecutionPolicy Bypass -File "$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1" -Browser both
-
-# source checkout
-powershell -ExecutionPolicy Bypass -File scripts/install-edge-bridge.ps1 -Browser both
 ```
 
 The installer publishes a self-contained native host, writes independent tokens
 to `~/.raw/edge-bridge.json` and `~/.raw/chrome-bridge.json`, and registers the
-selected native-messaging hosts. If the .NET 9 SDK is missing, it downloads the
-matching prebuilt host from [Releases](https://github.com/liutingqiu/raw-browser/releases)
-and verifies `SHA256SUMS.txt` when available. Use `-HostPath <exe>` to install a
-host you built yourself, or `-BuildFromSource` to force a local build.
+selected native-messaging hosts: HKCU on Windows,
+`NativeMessagingHosts` under `~/Library/Application Support` on macOS, and under
+`~/.config` on Linux. If the .NET 9 SDK is missing, it downloads the matching
+prebuilt host from [Releases](https://github.com/liutingqiu/raw-browser/releases)
+and verifies `SHA256SUMS.txt` when available. Use `--host-path` to install a
+host you built yourself, or `--build-from-source` to force a local build.
+
+The host always lives at `~/.raw/edge-bridge/current/` so the native-messaging
+manifest does not move between upgrades; the installer replaces the executable
+in place and keeps the previous pair for rollback.
+
+The browser and the host must be in the same operating system. A Windows Chrome
+cannot use a host installed in WSL: use the Windows installer for the Windows
+browser, or install a Linux Chrome/Edge inside WSL (with WSLg) and run this
+installer there. Snap- and Flatpak-confined browsers do not read the
+user-level native-messaging directory the installer writes; use a deb/rpm or
+app-bundle install for the bridge.
 
 Then load the unpacked extension once per browser:
 
@@ -180,8 +201,8 @@ or `{ "mode": "chrome-extension" }`. `raw status` prints the selected bridge,
 port and extension version. If the bridge does not connect after an upgrade,
 restart the browser once: it caches the native-messaging host path for the life
 of the process. Upgrading from an older installer? Restart the browser, then run
-the installer once with `-CleanLegacyHosts` to remove the old `host-*`
-directories.
+the installer once with `--clean-legacy-hosts` (`-CleanLegacyHosts` in
+PowerShell) to remove the old `host-*` directories.
 
 ## CLI
 
@@ -265,19 +286,20 @@ See [SECURITY.md](SECURITY.md).
 
 ```bash
 npm run typecheck   # strict TypeScript
-npm test            # 51 unit tests
+npm test            # 55 unit tests
 npm run build
 npm run smoke:browser
 npm run check       # all of the above plus the browser smoke test
 ```
 
-CI runs the suite on Ubuntu, Windows and macOS across Node 22, 24 and 26, plus a
-Windows bridge-host smoke test and a dependency audit.
+CI runs the suite on Ubuntu, Windows and macOS across Node 22, 24 and 26, plus
+native-host smoke tests on Windows, macOS and Linux and a dependency audit.
 
 ## Known limitations
 
-1. **The bridge installer is Windows-only today.** Direct CDP mode is
-   cross-platform.
+1. **Native messaging needs a desktop browser in the same OS.** The installer
+   covers Chrome and Edge stable on Windows, macOS and Linux; snap/Flatpak
+   confined browsers and WSL-to-Windows browser setups are not registered.
 2. **One debugger per tab.** Chromium allows a single CDP debugger client per
    tab; concurrent clients detach each other.
 3. **No `--space` in bridge mode.** Extensions cannot create an equivalent of

@@ -3,6 +3,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const BRIDGE_INSTALLER = path.join(PACKAGE_ROOT, "scripts", "install-edge-bridge.mjs");
 
 const HELP = `raw - browser automation runtime
 
@@ -72,7 +76,7 @@ if (bridgeBrowser) {
     process.env.RAW_BRIDGE_CONFIG ??= bridgeConfigPath;
   } catch (error: any) {
     process.stderr.write(
-      `raw: cannot use the ${bridgeBrowser} extension bridge (${bridgeConfigPath}): ${error.message}. Run scripts/install-edge-bridge.ps1 first.\n`,
+      `raw: cannot use the ${bridgeBrowser} extension bridge (${bridgeConfigPath}): ${error.message}. Run the bridge installer first: node "${BRIDGE_INSTALLER}" --browser ${bridgeBrowser}.\n`,
     );
     process.exit(2);
   }

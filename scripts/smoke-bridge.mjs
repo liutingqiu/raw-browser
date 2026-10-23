@@ -17,7 +17,10 @@ import { fileURLToPath } from "node:url";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const buildDir = path.join(repo, "edge-bridge", "host", "bin", "Release", "net9.0");
-const builtHost = path.join(buildDir, "raw-edge-bridge.exe");
+const hostName = process.platform === "win32" ? "raw-edge-bridge.exe" : "raw-edge-bridge";
+const builtHost = process.env.RAW_BRIDGE_HOST
+  ? path.resolve(process.env.RAW_BRIDGE_HOST)
+  : path.join(buildDir, hostName);
 
 if (!fs.existsSync(builtHost)) {
   console.error(`bridge host not built: ${builtHost}\nrun: dotnet publish edge-bridge/host/RawEdgeBridge.csproj -c Release`);
@@ -75,13 +78,23 @@ function frame(message) {
 
 async function runMode({ kind, port, token, versionField }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `raw-bridge-smoke-${kind}-`));
-  const exe = path.join(root, `raw-${kind}-bridge-smoke.exe`);
-  for (const file of ["raw-edge-bridge.exe", "raw-edge-bridge.dll", "raw-edge-bridge.deps.json", "raw-edge-bridge.runtimeconfig.json"]) {
-    const source = path.join(buildDir, file);
-    if (!fs.existsSync(source)) throw new Error(`missing build output: ${source}`);
-    const target = path.join(root, file === "raw-edge-bridge.exe" ? path.basename(exe) : file);
+  const smokeName = `raw-${kind}-bridge-smoke${process.platform === "win32" ? ".exe" : ""}`;
+  const exe = path.join(root, smokeName);
+  const sourceDir = path.dirname(builtHost);
+  const sourceName = path.basename(builtHost);
+  const sourceStem = sourceName.replace(/\.exe$/i, "");
+  const files = fs.readdirSync(sourceDir).filter((file) =>
+    file.startsWith(sourceStem) && fs.statSync(path.join(sourceDir, file)).isFile()
+  );
+  for (const file of files) {
+    const source = path.join(sourceDir, file);
+    const target = path.join(root, file === sourceName ? smokeName : file);
     fs.copyFileSync(source, target);
+    if (file === sourceName) {
+      try { fs.chmodSync(target, 0o755); } catch { /* Windows */ }
+    }
   }
+  if (!fs.existsSync(exe)) throw new Error(`could not stage the bridge host from ${builtHost}`);
   const configName = kind === "chrome" ? "chrome-bridge.json" : "edge-bridge.json";
   fs.writeFileSync(path.join(root, configName), JSON.stringify({ version: 1, token, port }));
 
