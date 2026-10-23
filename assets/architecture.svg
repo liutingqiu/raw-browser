@@ -1,86 +1,80 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="440" viewBox="0 0 1000 440" role="img" aria-label="raw-browser architecture">
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    <marker id="arrow-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#141518"/>
     </marker>
-    <style>
-      .bg { fill: #f8fafc; }
-      .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
-      .box-dark { fill: #0f172a; stroke: #0f172a; }
-      .chip { fill: #eff6ff; stroke: #bfdbfe; stroke-width: 1.2; }
-      .green { fill: #ecfdf5; stroke: #a7f3d0; stroke-width: 1.2; }
-      .title { font: 650 16px "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; fill: #0f172a; }
-      .title-light { font: 650 16px "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; fill: #f8fafc; }
-      .body { font: 400 12.5px "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; fill: #475569; }
-      .body-light { font: 400 12.5px "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; fill: #cbd5e1; }
-      .mono { font: 500 12px ui-monospace, SFMono-Regular, Consolas, monospace; fill: #1d4ed8; }
-      .label { font: 600 11px "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; fill: #64748b; letter-spacing: .08em; }
-      .line { stroke: #94a3b8; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
-      .line-plain { stroke: #94a3b8; stroke-width: 1.6; fill: none; }
-      .dash { stroke-dasharray: 5 5; }
-    </style>
+    <marker id="arrow-signal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff4d1c"/>
+    </marker>
   </defs>
 
-  <rect class="bg" x="0" y="0" width="1000" height="440" rx="0"/>
+  <rect x="0" y="0" width="1000" height="440" fill="#efeee9"/>
 
-  <!-- Agent layer -->
-  <text class="label" x="40" y="46">CALLER</text>
-  <rect class="box" x="40" y="60" width="190" height="130" rx="14"/>
-  <text class="title" x="60" y="90">Agent / script</text>
-  <text class="body" x="60" y="114">one multi-step task</text>
-  <text class="body" x="60" y="134">written as one script</text>
-  <rect class="chip" x="58" y="148" width="72" height="24" rx="7"/>
-  <text class="mono" x="70" y="164">raw run</text>
-  <rect class="chip" x="138" y="148" width="74" height="24" rx="7"/>
-  <text class="mono" x="150" y="164">MCP</text>
+  <!-- header -->
+  <rect x="40" y="28" width="10" height="10" fill="#ff4d1c"/>
+  <text x="58" y="38" font-family="Consolas, monospace" font-size="11" font-weight="600" fill="#6b6f76" letter-spacing="0.04em">raw-browser / architecture</text>
+  <line x1="40" y1="50" x2="960" y2="50" stroke="#141518" stroke-width="2"/>
 
-  <!-- Runtime -->
-  <text class="label" x="300" y="46">RUNTIME</text>
-  <rect class="box-dark" x="300" y="60" width="240" height="130" rx="14"/>
-  <text class="title-light" x="320" y="90">raw runtime</text>
-  <text class="body-light" x="320" y="114">Node 22+ · zero npm deps</text>
-  <text class="body-light" x="320" y="136">worker-isolated scripts</text>
-  <text class="body-light" x="320" y="158">page.* API · snapshots</text>
-  <text class="body-light" x="320" y="180">timeouts · downloads</text>
+  <!-- caller -->
+  <rect x="40" y="80" width="200" height="120" rx="2" fill="#fbfaf7" stroke="#141518" stroke-width="2"/>
+  <text x="58" y="112" font-family="Arial Narrow, Helvetica Neue, Arial, sans-serif" font-size="19" font-weight="700" fill="#141518">Agent / script</text>
+  <text x="58" y="136" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#3e434b">one multi-step task</text>
+  <text x="58" y="154" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#3e434b">written as one script</text>
+  <rect x="58" y="166" width="74" height="22" rx="2" fill="#efeee9" stroke="#141518" stroke-width="1.5"/>
+  <text x="70" y="181" font-family="Consolas, monospace" font-size="10" font-weight="600" fill="#141518">raw run</text>
+  <rect x="140" y="166" width="50" height="22" rx="2" fill="#efeee9" stroke="#141518" stroke-width="1.5"/>
+  <text x="152" y="181" font-family="Consolas, monospace" font-size="10" font-weight="600" fill="#141518">MCP</text>
 
-  <!-- Browser -->
-  <text class="label" x="760" y="46">BROWSER</text>
-  <rect class="box" x="760" y="60" width="200" height="130" rx="14"/>
-  <text class="title" x="780" y="90">Chrome / Edge</text>
-  <text class="body" x="780" y="114">your real, signed-in</text>
-  <text class="body" x="780" y="134">profile — tabs, cookies,</text>
-  <text class="body" x="780" y="154">extensions, downloads</text>
-  <rect class="green" x="778" y="166" width="102" height="22" rx="7"/>
-  <text class="mono" x="790" y="181" style="fill:#047857">no re-login</text>
+  <!-- runtime with selection marquee -->
+  <rect x="300" y="80" width="240" height="120" rx="2" fill="#141518" stroke="#141518" stroke-width="2"/>
+  <text x="320" y="112" font-family="Arial Narrow, Helvetica Neue, Arial, sans-serif" font-size="19" font-weight="700" fill="#fbfaf7">raw runtime</text>
+  <text x="320" y="136" font-family="Consolas, monospace" font-size="11" fill="#c9c6bf">Node 22+ / zero npm deps</text>
+  <text x="320" y="156" font-family="Consolas, monospace" font-size="11" fill="#c9c6bf">one script, one task</text>
+  <text x="320" y="176" font-family="Consolas, monospace" font-size="11" fill="#c9c6bf">page.snapshot() / waits / downloads</text>
+  <rect x="292" y="72" width="256" height="136" fill="none" stroke="#ff4d1c" stroke-width="3"/>
+  <rect x="288" y="68" width="8" height="8" fill="#ff4d1c"/>
+  <rect x="544" y="68" width="8" height="8" fill="#ff4d1c"/>
+  <rect x="288" y="204" width="8" height="8" fill="#ff4d1c"/>
+  <rect x="544" y="204" width="8" height="8" fill="#ff4d1c"/>
 
-  <!-- Direct path -->
-  <path class="line" d="M 540 105 C 620 105, 660 105, 760 105"/>
-  <rect x="596" y="82" width="112" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0"/>
-  <text class="mono" x="606" y="98">CDP :9222</text>
-  <text class="label" x="598" y="126" style="font-size:10px">DIRECT MODE</text>
+  <!-- browser -->
+  <rect x="760" y="80" width="200" height="120" rx="2" fill="#fbfaf7" stroke="#141518" stroke-width="2"/>
+  <text x="778" y="112" font-family="Arial Narrow, Helvetica Neue, Arial, sans-serif" font-size="19" font-weight="700" fill="#141518">Chrome / Edge</text>
+  <text x="778" y="136" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#3e434b">your real, signed-in</text>
+  <text x="778" y="154" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#3e434b">profile, tabs and cookies</text>
+  <rect x="778" y="166" width="92" height="22" rx="2" fill="#ff4d1c" stroke="#141518" stroke-width="1.5"/>
+  <text x="790" y="181" font-family="Consolas, monospace" font-size="10" font-weight="600" fill="#141518">no re-login</text>
 
-  <!-- Bridge path -->
-  <path class="line" d="M 540 170 C 590 170, 590 250, 620 250"/>
-  <rect class="box" x="620" y="212" width="150" height="76" rx="12"/>
-  <text class="title" x="638" y="238" style="font-size:14px">Native host</text>
-  <text class="body" x="638" y="258">.NET 9 · stdio</text>
-  <text class="body" x="638" y="276">127.0.0.1 + token</text>
+  <!-- direct path -->
+  <path d="M548 110 H760" fill="none" stroke="#ff4d1c" stroke-width="3" marker-end="url(#arrow-signal)"/>
+  <text x="610" y="98" font-family="Consolas, monospace" font-size="11" font-weight="600" fill="#ff4d1c">CDP 9222</text>
+  <text x="610" y="128" font-family="Consolas, monospace" font-size="9" fill="#6b6f76">direct</text>
 
-  <path class="line" d="M 770 250 C 810 250, 810 250, 852 250"/>
-  <rect class="box" x="852" y="212" width="108" height="76" rx="12"/>
-  <text class="title" x="868" y="238" style="font-size:14px">MV3 ext.</text>
-  <text class="body" x="868" y="258">chrome.debugger</text>
-  <text class="body" x="868" y="276">nativeMessaging</text>
+  <!-- bridge path -->
+  <path d="M420 208 V250 H620" fill="none" stroke="#141518" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arrow-ink)"/>
+  <text x="470" y="240" font-family="Consolas, monospace" font-size="10" font-weight="600" fill="#ff4d1c">bridge 9333 / 9334</text>
 
-  <path class="line" d="M 906 212 C 906 170, 880 170, 860 170"/>
-  <text class="label" x="646" y="204" style="font-size:10px">BRIDGE MODE · :9333 / :9334</text>
+  <rect x="620" y="212" width="150" height="76" rx="2" fill="#fbfaf7" stroke="#141518" stroke-width="2"/>
+  <text x="636" y="238" font-family="Arial Narrow, Helvetica Neue, Arial, sans-serif" font-size="16" font-weight="700" fill="#141518">Native host</text>
+  <text x="636" y="258" font-family="Consolas, monospace" font-size="10" fill="#3e434b">.NET 9 / stdio</text>
+  <text x="636" y="276" font-family="Consolas, monospace" font-size="10" fill="#3e434b">127.0.0.1 + token</text>
 
-  <!-- Footer notes -->
-  <rect x="40" y="330" width="440" height="72" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
-  <text class="title" x="60" y="356" style="font-size:14px">Direct mode</text>
-  <text class="body" x="60" y="378">Own dedicated profile, cross-platform, isolated --space contexts.</text>
+  <path d="M770 250 H820" fill="none" stroke="#141518" stroke-width="2" marker-end="url(#arrow-ink)"/>
 
-  <rect x="520" y="330" width="440" height="72" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
-  <text class="title" x="540" y="356" style="font-size:14px">Bridge mode</text>
-  <text class="body" x="540" y="378">Drives the browser you are already signed into. Windows installer today.</text>
+  <rect x="820" y="212" width="140" height="76" rx="2" fill="#fbfaf7" stroke="#141518" stroke-width="2"/>
+  <text x="836" y="238" font-family="Arial Narrow, Helvetica Neue, Arial, sans-serif" font-size="16" font-weight="700" fill="#141518">MV3 extension</text>
+  <text x="836" y="258" font-family="Consolas, monospace" font-size="10" fill="#3e434b">chrome.debugger</text>
+  <text x="836" y="276" font-family="Consolas, monospace" font-size="10" fill="#3e434b">nativeMessaging</text>
+
+  <path d="M890 212 V200" fill="none" stroke="#141518" stroke-width="2" marker-end="url(#arrow-ink)"/>
+
+  <!-- notes -->
+  <line x1="40" y1="326" x2="960" y2="326" stroke="#141518" stroke-width="2"/>
+  <rect x="40" y="344" width="8" height="8" fill="#ff4d1c"/>
+  <text x="56" y="353" font-family="Arial Narrow, Helvetica Neue, Arial, sans-serif" font-size="17" font-weight="700" fill="#141518">Direct</text>
+  <text x="56" y="376" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#6b6f76">dedicated profile / isolated spaces / cross-platform</text>
+
+  <rect x="520" y="344" width="8" height="8" fill="#ff4d1c"/>
+  <text x="536" y="353" font-family="Arial Narrow, Helvetica Neue, Arial, sans-serif" font-size="17" font-weight="700" fill="#141518">Bridge</text>
+  <text x="536" y="376" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#6b6f76">your signed-in browser / token-authenticated loopback / Windows installer</text>
 </svg>

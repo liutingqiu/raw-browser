@@ -4,109 +4,226 @@
 <meta charset="utf-8" />
 <title>raw-browser social card</title>
 <style>
+  :root {
+    --paper: #efeee9;
+    --paper-2: #fbfaf7;
+    --ink: #141518;
+    --chrome: #d5d8de;
+    --chrome-2: #c2c7cf;
+    --muted: #6b6f76;
+    --line: #ddd9d0;
+    --signal: #ff4d1c;
+    --signal-soft: #ffe2d8;
+    --dark: #1b1d21;
+    --dark-2: #141518;
+    --dark-line: #2c2f35;
+    --display: "Bahnschrift Condensed", "Bahnschrift", "Arial Narrow", "Segoe UI", sans-serif;
+    --body: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  }
   * { box-sizing: border-box; }
   html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; }
   body {
-    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Inter, Roboto, sans-serif;
-    background:
-      radial-gradient(900px 500px at 88% 8%, rgba(37, 99, 235, .38), transparent 62%),
-      radial-gradient(700px 420px at 8% 100%, rgba(16, 185, 129, .16), transparent 60%),
-      #0b1220;
-    color: #f8fafc;
+    font-family: var(--body);
+    background: var(--paper);
+    color: var(--ink);
+    display: grid;
+    place-items: center;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .browser {
+    width: 1200px;
+    height: 560px;
+    border: 2px solid var(--ink);
+    background: var(--paper-2);
+    box-shadow: 10px 10px 0 var(--chrome);
     display: flex;
-    align-items: center;
-    padding: 64px 72px;
-    gap: 56px;
-  }
-  .left { width: 560px; flex: none; }
-  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 34px; }
-  .mark {
-    width: 40px; height: 40px; border-radius: 12px; background: #2563eb;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-weight: 800; font-size: 17px; letter-spacing: -.05em;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), 0 10px 24px -10px rgba(37,99,235,.9);
-  }
-  .brand b { font-size: 19px; letter-spacing: -.02em; font-weight: 650; }
-  .brand span { color: #64748b; font-weight: 500; }
-  h1 {
-    margin: 0 0 20px;
-    font-size: 60px;
-    line-height: 1.02;
-    letter-spacing: -.045em;
-    font-weight: 750;
-  }
-  h1 em { font-style: normal; color: #60a5fa; }
-  p {
-    margin: 0 0 28px;
-    font-size: 21px;
-    line-height: 1.45;
-    color: #94a3b8;
-    max-width: 520px;
-  }
-  .pills { display: flex; gap: 10px; flex-wrap: wrap; }
-  .pill {
-    font-size: 13px; font-weight: 600; color: #cbd5e1;
-    border: 1px solid rgba(148, 163, 184, .28);
-    background: rgba(148, 163, 184, .08);
-    padding: 7px 12px; border-radius: 999px;
-  }
-  .url {
-    margin-top: 42px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-    font-size: 15px; color: #7dd3fc;
-  }
-  .code {
-    flex: 1;
-    background: rgba(15, 23, 42, .78);
-    border: 1px solid rgba(148, 163, 184, .2);
-    border-radius: 20px;
-    box-shadow: 0 40px 90px -30px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255,255,255,.05);
+    flex-direction: column;
     overflow: hidden;
   }
-  .bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 14px 18px; border-bottom: 1px solid rgba(148,163,184,.14);
-    color: #64748b; font-size: 12px; font-family: ui-monospace, Consolas, monospace;
+  .tabs {
+    height: 48px; flex: none; background: var(--chrome);
+    border-bottom: 2px solid var(--ink);
+    display: flex; align-items: flex-end; gap: 3px; padding: 0 14px;
   }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #334155; }
-  .bar span { margin-left: 8px; }
-  pre {
-    margin: 0; padding: 26px 28px 30px;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-    font-size: 16px; line-height: 1.85; color: #cbd5e1; white-space: pre-wrap;
+  .tab {
+    height: 32px; padding: 0 14px; display: flex; align-items: center; gap: 7px;
+    font: 600 12px var(--body); color: #3e434b; white-space: nowrap;
   }
-  .kw { color: #c084fc; }
-  .fn { color: #60a5fa; }
-  .str { color: #86efac; }
-  .num { color: #fbbf24; }
-  .cmt { color: #475569; }
+  .tab.active {
+    height: 38px; background: var(--paper-2); border: 2px solid var(--ink);
+    border-bottom: 0; border-top: 3px solid var(--signal); color: var(--ink);
+    margin-bottom: -2px; padding-top: 3px;
+  }
+  .tab .dot { width: 7px; height: 7px; background: var(--signal); display: block; }
+  .tabs .spacer { flex: 1; }
+  .win-controls { display: flex; gap: 5px; padding-bottom: 15px; }
+  .win-controls i { width: 10px; height: 10px; border: 1.5px solid var(--ink); display: block; }
+
+  .address {
+    height: 40px; flex: none; display: flex; align-items: center; gap: 9px;
+    padding: 0 12px; background: var(--paper-2); border-bottom: 2px solid var(--ink);
+  }
+  .lock { width: 12px; height: 14px; border: 1.5px solid var(--ink); border-radius: 2px; position: relative; flex: none; }
+  .lock::before { content: ""; position: absolute; left: 2px; top: -5px; width: 6px; height: 6px; border: 1.5px solid var(--ink); border-bottom: 0; border-radius: 4px 4px 0 0; }
+  .url {
+    flex: 1; height: 27px; border: 1.5px solid var(--chrome-2); background: #fff;
+    display: flex; align-items: center; padding: 0 9px;
+    font: 11.5px var(--mono); color: #3e434b;
+  }
+  .url b { color: var(--ink); }
+  .connected { display: flex; align-items: center; gap: 6px; font: 600 10px var(--mono); color: var(--muted); letter-spacing: .03em; }
+  .connected i { width: 7px; height: 7px; background: var(--signal); display: block; }
+
+  .content { flex: 1; display: flex; min-height: 0; }
+  .left { width: 58%; padding: 34px 30px 26px 40px; display: flex; flex-direction: column; }
+  .left h1 {
+    margin: 0;
+    font-family: var(--display);
+    font-stretch: condensed;
+    font-weight: 700;
+    font-size: 58px;
+    line-height: .94;
+    letter-spacing: -.015em;
+  }
+  .selection-row { display: flex; align-items: flex-end; gap: 12px; margin-top: 8px; }
+  .select-line {
+    display: inline-block;
+    position: relative;
+    padding: 2px 10px 3px 8px;
+    border: 3px solid var(--signal);
+    color: var(--ink);
+  }
+  .select-line .handle {
+    position: absolute; width: 8px; height: 8px; background: var(--signal); border: 1.5px solid var(--paper-2);
+  }
+  .handle.tl { left: -5px; top: -5px; }
+  .handle.tr { right: -5px; top: -5px; }
+  .handle.bl { left: -5px; bottom: -5px; }
+  .handle.br { right: -5px; bottom: -5px; }
+  .selection-note {
+    margin: 0 0 4px;
+    font: 600 9px var(--mono);
+    color: var(--signal);
+    letter-spacing: .02em;
+  }
+  .lede {
+    margin: 18px 0 0;
+    max-width: 520px;
+    font-size: 17px;
+    line-height: 1.45;
+    color: #3e434b;
+  }
+  .tags { display: flex; gap: 7px; margin-top: 18px; flex-wrap: wrap; }
+  .tag {
+    border: 1.5px solid var(--ink); padding: 4px 7px;
+    font: 600 10px var(--mono); color: var(--ink); background: var(--paper-2);
+  }
+  .tag.signal { background: var(--signal); }
+  .run-line {
+    margin-top: auto;
+    display: flex; align-items: center; gap: 7px;
+    font: 12px var(--mono); color: var(--ink);
+  }
+  .run-line b { color: var(--signal); font-size: 14px; }
+  .url-line {
+    margin-top: 8px;
+    font: 12.5px var(--mono);
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--signal);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+  }
+
+  .right { width: 42%; background: var(--dark); border-left: 2px solid var(--ink); display: flex; flex-direction: column; }
+  .code-head {
+    height: 38px; flex: none; display: flex; align-items: center; gap: 7px;
+    padding: 0 12px; border-bottom: 1px solid var(--dark-line);
+    font: 600 11px var(--mono); color: #c9c6bf;
+  }
+  .code-head .dot { width: 7px; height: 7px; background: var(--signal); display: block; }
+  .code-head .spacer { flex: 1; }
+  .code-head .live { color: var(--signal); font-size: 9px; letter-spacing: .08em; }
+  .code { flex: 1; padding: 10px 0; }
+  .code-line {
+    display: flex; gap: 9px; padding: 1px 12px 1px 0;
+    border-left: 3px solid transparent;
+    font: 13px/1.72 var(--mono); color: #c9c6bf; white-space: pre;
+  }
+  .code-line .ln { width: 20px; flex: none; text-align: right; color: #5e636c; font-size: 10.5px; line-height: 22.4px; }
+  .code-line.active { background: rgba(255, 77, 28, .16); border-left-color: var(--signal); color: #fff; }
+  .code-line.active .ln { color: var(--signal); }
+  .code-line.done { color: #7e838b; }
+  .kw { color: #ff9b7d; }
+  .str { color: #b9d99a; }
+  .fn { color: #9ec4e8; }
+  .cm { color: #626871; }
+  .code-foot {
+    flex: none; height: 32px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; border-top: 1px solid var(--dark-line);
+    font: 10px var(--mono); color: #8e939b;
+  }
+  .code-foot b { color: var(--signal); font-weight: 600; }
 </style>
 </head>
 <body>
-  <div class="left">
-    <div class="brand">
-      <span class="mark">raw</span>
-      <b>raw-browser</b><span>/ browser automation</span>
+  <div class="browser">
+    <div class="tabs">
+      <div class="tab active"><span class="dot"></span>raw-browser</div>
+      <div class="tab">your browser</div>
+      <div class="tab">one script</div>
+      <div class="spacer"></div>
+      <div class="win-controls"><i></i><i></i><i></i></div>
     </div>
-    <h1>Your browser.<br /><em>One script.</em></h1>
-    <p>A zero-dependency browser automation runtime, CLI and MCP server for AI agents. Drives the Chrome or Edge you're already signed into.</p>
-    <div class="pills">
-      <span class="pill">MIT</span>
-      <span class="pill">Node 22+</span>
-      <span class="pill">Chrome &amp; Edge</span>
-      <span class="pill">MCP server</span>
-      <span class="pill">51 tests</span>
-    </div>
-    <div class="url">github.com/liutingqiu/raw-browser</div>
-  </div>
-  <div class="code">
-    <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>demo.mjs</span></div>
-    <pre><span class="kw">const</span> snap = <span class="kw">await</span> page.<span class="fn">snapshot</span>();
-<span class="kw">await</span> page.<span class="fn">click</span>(<span class="str">'#12'</span>);
-<span class="kw">await</span> page.<span class="fn">fill</span>(<span class="str">'role=textbox'</span>, <span class="str">'Initech'</span>);
 
-<span class="kw">const</span> file = <span class="kw">await</span> page.<span class="fn">waitForDownload</span>(() =&gt;
-  page.<span class="fn">click</span>(<span class="str">'#export'</span>));
-<span class="cmt">// orders.csv · 66 bytes · one round-trip</span></pre>
+    <div class="address">
+      <span class="lock"></span>
+      <div class="url">raw://<b>one-script</b></div>
+      <span class="connected"><i></i>raw connected</span>
+    </div>
+
+    <div class="content">
+      <section class="left">
+        <h1>Your browser.</h1>
+        <div class="selection-row">
+          <div class="select-line">One script.
+            <span class="handle tl"></span><span class="handle tr"></span>
+            <span class="handle bl"></span><span class="handle br"></span>
+          </div>
+          <div class="selection-note">1 element selected</div>
+        </div>
+
+        <p class="lede">A zero-dependency browser automation runtime, CLI and MCP server for AI agents. Drives the Chrome or Edge you're already signed into.</p>
+
+        <div class="tags">
+          <span class="tag">MIT</span>
+          <span class="tag">Node 22+</span>
+          <span class="tag signal">v0.6.0</span>
+          <span class="tag">MCP 16 tools</span>
+        </div>
+
+        <div class="run-line"><b>›</b> raw run demo.mjs</div>
+        <div class="url-line">github.com/liutingqiu/raw-browser</div>
+      </section>
+
+      <aside class="right">
+        <div class="code-head"><span class="dot"></span>run.mjs<span class="spacer"></span><span class="live">LIVE</span></div>
+        <div class="code">
+          <div class="code-line"><span class="ln">1</span><span><span class="kw">const</span> p = <span class="kw">await</span> page.<span class="fn">newTab</span>(url)</span></div>
+          <div class="code-line"><span class="ln">2</span><span></span></div>
+          <div class="code-line"><span class="ln">3</span><span><span class="kw">const</span> snap = <span class="kw">await</span> p.<span class="fn">snapshot</span>()</span></div>
+          <div class="code-line active"><span class="ln">4</span><span><span class="kw">await</span> p.<span class="fn">click</span>(<span class="str">'#12'</span>)</span></div>
+          <div class="code-line"><span class="ln">5</span><span></span></div>
+          <div class="code-line"><span class="ln">6</span><span><span class="kw">const</span> file = <span class="kw">await</span> p.<span class="fn">waitForDownload</span>(() =&gt;</span></div>
+          <div class="code-line"><span class="ln">7</span><span>  p.<span class="fn">click</span>(<span class="str">'#export'</span>))</span></div>
+          <div class="code-line"><span class="ln">8</span><span></span></div>
+          <div class="code-line"><span class="ln">9</span><span><span class="cm">// orders.csv (66 bytes)</span></span></div>
+        </div>
+        <div class="code-foot"><span>1 script</span><span><b>0</b> model round-trips</span></div>
+      </aside>
+    </div>
   </div>
 </body>
 </html>
