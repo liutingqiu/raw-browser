@@ -73,6 +73,9 @@ jobs:
 
   npm:
     needs: release
+    # Automatic publishing stays off until the repository sets this variable
+    # together with a valid NPM_TOKEN. Manual `npm publish` works without it.
+    if: ${{ vars.NPM_AUTOPUBLISH == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -88,8 +91,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      # Set an NPM_TOKEN repository secret to publish automatically. Without
-      # it the step is skipped and the tarball remains on the GitHub release.
+      # Automatic publishing also needs NPM_AUTOPUBLISH=true and a valid
+      # NPM_TOKEN secret. Otherwise publish the release tarball manually.
       - name: publish to npm
         if: ${{ env.NODE_AUTH_TOKEN != '' }}
         run: npm publish --ignore-scripts --provenance --access public
