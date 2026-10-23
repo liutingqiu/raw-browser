@@ -3,7 +3,7 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
-## [Unreleased]
+## [0.6.0] - 2026-10-23
 
 ### Added
 
@@ -29,6 +29,9 @@ follow Semantic Versioning.
 
 ### Changed
 
+- The package is published on npm as `raw-browser`; the README quick start now
+  leads with `npm install -g raw-browser` and documents the bridge installer in
+  a global install (`$(npm root -g)\raw-browser\scripts\...`).
 - README and README.zh-CN lead with a quick start and a demo, document the
   prebuilt-host install path, and link the API reference.
 - npm metadata now includes MCP/browser keywords, funding, `publishConfig`, and
@@ -175,7 +178,8 @@ follow Semantic Versioning.
 - Strict TypeScript checking, a locked development toolchain, and full CLI protocol, setup, and permission smoke tests now gate publication.
 - Browser smoke testing uses a disposable profile and covers forms, iframes, downloads, screenshots, isolated spaces, cleanup, and CPU timeouts.
 
-[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.0
 [0.5.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.5.1
 [0.5.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.5.0
 [0.4.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.4.0

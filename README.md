@@ -23,33 +23,29 @@ English | [简体中文](README.zh-CN.md)
 Requires **Node.js 22.21+** and Chrome or Edge.
 
 ```bash
+npm install -g raw-browser
+raw status
+raw run -e "const p = await page.newTab('https://example.com'); console.log(await p.title()); await p.closeTab()"
+```
+
+In direct CDP mode the first run launches a dedicated browser profile under
+`~/.raw/` and keeps it across runs, so logins survive.
+
+From source instead:
+
+```bash
 git clone https://github.com/liutingqiu/raw-browser.git
 cd raw-browser
 npm install
 npm run build
-
-node dist/browser-cli.js status
-node dist/browser-cli.js run -e "const p = await page.newTab('https://example.com'); console.log(await p.title()); await p.closeTab()"
-```
-
-In direct CDP mode the first run launches a dedicated browser profile under
-`~/.raw/` and keeps it across runs, so logins survive. To put `raw` on your PATH:
-
-```bash
 npm link
 raw status
 ```
 
-Want just the CLI and direct CDP mode? Each release also carries a stable
-tarball:
-
-```bash
-npm install -g https://github.com/liutingqiu/raw-browser/releases/latest/download/raw-browser.tgz
-raw status
-```
-
-The extension bridge is easiest from a clone, because the installer expects the
-repository's `edge-bridge/` layout.
+Pinned or offline installs can use the `raw-browser.tgz` tarball attached to each
+[release](https://github.com/liutingqiu/raw-browser/releases/latest). The
+extension bridge installer ships in both the npm package and a clone; a global
+install runs it with `$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1`.
 
 ## Why raw-browser
 
@@ -153,7 +149,10 @@ The bridge installer is currently Windows PowerShell. Direct CDP mode works on
 Windows, macOS and Linux.
 
 ```powershell
-# Edge + Chrome; use -Browser edge or -Browser chrome for one
+# global npm install
+powershell -ExecutionPolicy Bypass -File "$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1" -Browser both
+
+# source checkout
 powershell -ExecutionPolicy Bypass -File scripts/install-edge-bridge.ps1 -Browser both
 ```
 
@@ -168,7 +167,8 @@ Then load the unpacked extension once per browser:
 
 1. Open `edge://extensions` or `chrome://extensions`.
 2. Enable **Developer mode**.
-3. Choose **Load unpacked** and select `edge-bridge/extension`.
+3. Choose **Load unpacked** and select the path printed as `ExtensionPath` (in a
+   clone it is `edge-bridge/extension`).
 
 Select the bridge in `~/.raw/browser-profiles/current.json`:
 
