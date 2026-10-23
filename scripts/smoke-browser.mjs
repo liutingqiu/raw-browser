@@ -24,6 +24,8 @@ process.env.RAW_BROWSER_PORT = String(debugPort);
 process.env.RAW_BROWSER_PROFILE = profile;
 process.env.RAW_DOWNLOAD_DIR = downloads;
 process.env.RAW_BROWSER_HEADLESS = "1";
+// Windows CI runners can be slow to start a cold browser.
+process.env.RAW_BROWSER_LAUNCH_TIMEOUT_MS = "60000";
 const { closeBrowser, runBrowserScript } = await import("../dist/browser.js");
 
 const html = `<!doctype html>
@@ -121,14 +123,19 @@ async function removeTempRoot() {
       fs.rmSync(root, { recursive: true, force: true });
       return;
     } catch (err) {
-      if (attempt === 29) throw err;
+      // A browser that failed to start can still hold the profile open on
+      // Windows. Reporting that permission error would hide the real failure.
+      if (attempt === 29) {
+        console.warn(`smoke: could not remove ${root}: ${err.message}`);
+        return;
+      }
       await delay(100);
     }
   }
 }
 
 try {
-  const result = await runBrowserScript(script, { timeoutMs: 30_000 });
+  const result = await runBrowserScript(script, { timeoutMs: 90_000 });
   console.log(result.text);
   assert.equal(result.text.startsWith("Error:"), false, result.text);
   assert.equal(result.images?.length, 2);
