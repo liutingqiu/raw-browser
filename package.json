@@ -1,6 +1,6 @@
 {
   "name": "raw-browser",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Drive the Chrome or Edge you're already signed into from one script — a zero-dependency browser automation runtime, CLI and MCP server for AI agents.",
   "keywords": [
     "ai",
@@ -26,7 +26,8 @@
   "type": "module",
   "bin": {
     "raw": "dist/browser-cli.js",
-    "raw-bridge": "scripts/raw-bridge.mjs"
+    "raw-bridge": "scripts/raw-bridge.mjs",
+    "raw-mcp": "mcp/raw-browser-mcp.mjs"
   },
   "files": [
     "dist",

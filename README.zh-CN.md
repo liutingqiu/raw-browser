@@ -193,10 +193,25 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 
 ## MCP server
 
-`mcp/raw-browser-mcp.mjs` 把运行时暴露为 16 个 MCP 工具：`raw_use`、
-`raw_status`、`raw_tabs`、`raw_new`、`raw_goto`、`raw_text`、`raw_html`、
-`raw_eval`、`raw_snapshot`、`raw_click`、`raw_fill`、`raw_visit`、
-`raw_screenshot`、`raw_cookies`、`raw_frames`，以及逃生舱 `raw_call`。
+`npm install -g raw-browser` 会同时安装 `raw-mcp`，这是一个 stdio MCP server，
+把运行时暴露为 16 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
+`raw_new`、`raw_goto`、`raw_text`、`raw_html`、`raw_eval`、`raw_snapshot`、
+`raw_click`、`raw_fill`、`raw_visit`、`raw_screenshot`、`raw_cookies`、
+`raw_frames`，以及逃生舱 `raw_call`。
+
+```json
+{
+  "mcpServers": {
+    "raw-browser": {
+      "type": "stdio",
+      "command": "raw-mcp",
+      "env": { "RAW_BRIDGE_BROWSER": "edge" }
+    }
+  }
+}
+```
+
+从源码目录运行时，改为指向 `mcp/raw-browser-mcp.mjs`：
 
 ```json
 {
@@ -213,7 +228,10 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 
 服务端会记住当前标签页，截图以 image content 返回，工具调用串行执行，并支持
 取消。`raw-bridge.mjs` 不在服务端旁边时用 `RAW_CLI` 指定；用
-`RAW_BRIDGE_BROWSER=edge|chrome` 选择桥。
+`RAW_BRIDGE_BROWSER=edge|chrome` 选择桥。该 server 已登记在
+[HOL Guard](https://github.com/hashgraph-online/hol-guard) 的 MCP 目录中
+（`mcp.raw-browser`）：只读工具沿用默认策略，导航、输入和 Cookie 读取需要复核，
+`raw_eval` / `raw_call` 被阻止。
 
 ## 安全模型
 

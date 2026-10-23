@@ -204,10 +204,25 @@ directories.
 
 ## MCP server
 
-`mcp/raw-browser-mcp.mjs` exposes the runtime as 16 MCP tools: `raw_use`,
-`raw_status`, `raw_tabs`, `raw_new`, `raw_goto`, `raw_text`, `raw_html`,
-`raw_eval`, `raw_snapshot`, `raw_click`, `raw_fill`, `raw_visit`,
-`raw_screenshot`, `raw_cookies`, `raw_frames` and the `raw_call` escape hatch.
+`npm install -g raw-browser` also installs `raw-mcp`, a stdio MCP server that
+exposes the runtime as 16 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
+`raw_new`, `raw_goto`, `raw_text`, `raw_html`, `raw_eval`, `raw_snapshot`,
+`raw_click`, `raw_fill`, `raw_visit`, `raw_screenshot`, `raw_cookies`,
+`raw_frames` and the `raw_call` escape hatch.
+
+```json
+{
+  "mcpServers": {
+    "raw-browser": {
+      "type": "stdio",
+      "command": "raw-mcp",
+      "env": { "RAW_BRIDGE_BROWSER": "edge" }
+    }
+  }
+}
+```
+
+From a source checkout, point the client at `mcp/raw-browser-mcp.mjs` instead:
 
 ```json
 {
@@ -225,7 +240,10 @@ directories.
 The server remembers the current tab, returns screenshots as image content,
 serializes tool calls, and supports cancellation. Set `RAW_CLI` when
 `raw-bridge.mjs` is not next to the server, and `RAW_BRIDGE_BROWSER=edge|chrome`
-to pick a bridge.
+to pick a bridge. The server is registered in the
+[HOL Guard](https://github.com/hashgraph-online/hol-guard) MCP catalog as
+`mcp.raw-browser`: read-only tools inherit normal policy, navigation, input and
+cookie reads are reviewed, and `raw_eval` / `raw_call` are blocked.
 
 ## Security model
 

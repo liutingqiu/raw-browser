@@ -3,6 +3,16 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [0.6.2] - 2026-10-23
+
+### Added
+
+- `raw-mcp` bin: a global install now exposes the stdio MCP server as
+  `raw-mcp`, so MCP clients can start it without a path to
+  `mcp/raw-browser-mcp.mjs`. The path-based configuration still works.
+- README and README.zh-CN document both launch forms and the HOL Guard
+  catalog entry for the MCP server.
+
 ## [0.6.1] - 2026-10-23
 
 ### Changed
