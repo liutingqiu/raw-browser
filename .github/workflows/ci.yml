@@ -1,6 +1,6 @@
 name: ci
 
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 permissions:
   contents: read
@@ -69,6 +69,66 @@ jobs:
       - run: npm ci
       - run: dotnet build edge-bridge/host/RawEdgeBridge.csproj -c Release --nologo
       - run: node scripts/smoke-bridge.mjs
+
+  bridge-host-posix:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: publish the single-file host
+        shell: bash
+        run: |
+          RID=$(node -p "process.platform === 'darwin' ? (process.arch === 'arm64' ? 'osx-arm64' : 'osx-x64') : 'linux-x64'")
+          dotnet publish edge-bridge/host/RawEdgeBridge.csproj -c Release -r "$RID" \
+            --self-contained true -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true -o host-out --nologo
+          chmod +x host-out/raw-edge-bridge
+          test -x host-out/raw-edge-bridge
+      - name: smoke the native host
+        shell: bash
+        env:
+          RAW_BRIDGE_HOST: ${{ github.workspace }}/host-out/raw-edge-bridge
+        run: node scripts/smoke-bridge.mjs
+      - name: install into a disposable home
+        shell: bash
+        run: |
+          node scripts/install-edge-bridge.mjs --browser both \
+            --host-path "$PWD/host-out/raw-edge-bridge" --home "$RUNNER_TEMP/raw-home"
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const home = path.join(process.env.RUNNER_TEMP, "raw-home");
+          const raw = path.join(home, ".raw");
+          for (const file of ["edge-bridge.json", "chrome-bridge.json"]) {
+            if (!fs.existsSync(path.join(raw, file))) throw new Error(`missing ${file}`);
+          }
+          const manifestRoot = path.join(raw, "edge-bridge");
+          for (const file of ["com.raw.edge_bridge.edge.json", "com.raw.edge_bridge.chrome.json"]) {
+            const manifest = JSON.parse(fs.readFileSync(path.join(manifestRoot, file), "utf8"));
+            if (manifest.type !== "stdio" || !manifest.allowed_origins[0].startsWith("chrome-extension://")) {
+              throw new Error(`bad manifest ${file}`);
+            }
+          }
+          const browserDir = process.platform === "darwin"
+            ? path.join(home, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts")
+            : path.join(home, ".config", "google-chrome", "NativeMessagingHosts");
+          if (!fs.existsSync(path.join(browserDir, "com.raw.edge_bridge.json"))) {
+            throw new Error("chrome native-messaging manifest was not registered");
+          }
+          const host = path.join(raw, "edge-bridge", "current", "raw-edge-bridge");
+          if (!(fs.statSync(host).mode & 0o111)) throw new Error("installed host is not executable");
+          NODE
 
   dependency-audit:
     timeout-minutes: 5

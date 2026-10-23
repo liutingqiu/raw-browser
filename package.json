@@ -1,6 +1,6 @@
 {
   "name": "raw-browser",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Drive the Chrome or Edge you're already signed into from one script — a zero-dependency browser automation runtime, CLI and MCP server for AI agents.",
   "keywords": [
     "ai",
@@ -64,7 +64,7 @@
     "dev": "node src/browser-cli.ts",
     "test": "node --no-warnings --test",
     "smoke:browser": "npm run build && node scripts/smoke-browser.mjs",
-    "smoke:bridge": "npm run build && node scripts/smoke-bridge.mjs",
+    "smoke:bridge": "dotnet build edge-bridge/host/RawEdgeBridge.csproj -c Release --nologo && npm run build && node scripts/smoke-bridge.mjs",
     "browser": "node src/browser-cli.ts",
     "demo": "npm run build && node scripts/demo.mjs",
     "social-card": "npm run build && node scripts/render-social-card.mjs"

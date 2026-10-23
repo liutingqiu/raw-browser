@@ -3,6 +3,35 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [0.7.0] - 2026-10-23
+
+### Added
+
+- The extension bridge now installs on macOS and Linux. A cross-platform
+  `scripts/install-edge-bridge.mjs` handles the native-messaging host,
+  `~/.raw/edge-bridge.json` / `~/.raw/chrome-bridge.json`, and the browser
+  manifests under `~/Library/Application Support` (macOS) or `~/.config`
+  (Linux). On Windows it delegates to the existing PowerShell installer, so
+  one command works everywhere.
+- Release builds now publish self-contained hosts for `linux-x64`,
+  `linux-arm64`, `osx-x64` and `osx-arm64` alongside `win-x64`, plus a single
+  `SHA256SUMS.txt` covering every archive.
+- CI runs the native-host smoke test on Ubuntu, macOS and Windows, plus a real
+  installer pass on Ubuntu and macOS.
+
+### Changed
+
+- Browser discovery also finds Chrome Beta/Canary, Chromium and Edge
+  Beta/Dev/Canary, plus Linux packages under `/opt` and snap Chromium, so
+  macOS/Linux users are less likely to need `RAW_BROWSER_PATH`.
+- README, README.zh-CN and `edge-bridge/README.md` document the cross-platform
+  install, the per-OS native-messaging directories, and the WSL/snap caveats.
+
+### Fixed
+
+- The native host treats process enumeration as best-effort, so a restricted
+  `Process.GetProcessesByName` call on macOS or Linux cannot prevent startup.
+
 ## [0.6.2] - 2026-10-23
 
 ### Added
@@ -203,7 +232,9 @@ follow Semantic Versioning.
 - Strict TypeScript checking, a locked development toolchain, and full CLI protocol, setup, and permission smoke tests now gate publication.
 - Browser smoke testing uses a disposable profile and covers forms, iframes, downloads, screenshots, isolated spaces, cleanup, and CPU timeouts.
 
-[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.7.0
+[0.6.2]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.2
 [0.6.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.1
 [0.6.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.0
 [0.5.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.5.1

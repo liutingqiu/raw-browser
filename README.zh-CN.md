@@ -45,7 +45,7 @@ raw status
 需要固定版本或离线安装时，可以用每个
 [Release](https://github.com/liutingqiu/raw-browser/releases/latest) 附带的
 `raw-browser.tgz`。扩展桥安装脚本在 npm 包和克隆仓库里都有；全局安装时用
-`$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1` 运行。
+`node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs"` 运行。
 
 ## 为什么是 raw-browser
 
@@ -137,22 +137,39 @@ Cookie API 时才会返回 Cookie 值。
 
 ## 驱动已登录的浏览器
 
-桥接安装脚本目前是 Windows PowerShell；直连 CDP 模式支持 Windows / macOS / Linux。
+桥接安装器支持 Windows / macOS / Linux；直连 CDP 模式同样三平台可用。
 
-```powershell
-# 全局 npm 安装
-powershell -ExecutionPolicy Bypass -File "$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1" -Browser both
+```bash
+# 全局 npm 安装（macOS / Linux）
+node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs" --browser both
 
-# 源码克隆
-powershell -ExecutionPolicy Bypass -File scripts/install-edge-bridge.ps1 -Browser both
+# 源码克隆（任意平台）
+node scripts/install-edge-bridge.mjs --browser both
 ```
 
-安装脚本会发布自包含的原生宿主，生成独立的
+Windows 上同一条 Node 命令会转交给 PowerShell 安装器；也可以直接运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1" -Browser both
+```
+
+安装器会发布自包含的原生宿主，生成独立的
 `~/.raw/edge-bridge.json` 与 `~/.raw/chrome-bridge.json`，并注册所选浏览器的
-Native Messaging 宿主。没有 .NET 9 SDK 时，它会从
+Native Messaging 宿主：Windows 写 HKCU，macOS 写到
+`~/Library/Application Support` 下的 `NativeMessagingHosts`，Linux 写到
+`~/.config` 下。没有 .NET 9 SDK 时，它会从
 [Releases](https://github.com/liutingqiu/raw-browser/releases) 下载匹配版本的
-预编译宿主，并在有 `SHA256SUMS.txt` 时校验。也可以用 `-HostPath <exe>`
-安装自己编译的宿主，或用 `-BuildFromSource` 强制本地编译。
+预编译宿主，并在有 `SHA256SUMS.txt` 时校验。也可以用 `--host-path`
+安装自己编译的宿主，或用 `--build-from-source` 强制本地编译。
+
+宿主始终安装在 `~/.raw/edge-bridge/current/`，升级时原地替换，上一版留在
+`previous/` 便于回滚，Native Messaging 清单不会因升级改路径。
+
+浏览器和宿主必须在同一个操作系统里。Windows 的 Chrome 不能使用装在 WSL
+里的宿主：要驱动 Windows 浏览器就用 Windows 安装器；要在 WSL 里用桥接，就
+在 WSL 内安装 Linux 版 Chrome / Edge（需要 WSLg），再运行这个安装器。Snap 和
+Flatpak 沙箱里的浏览器不会读取安装器写入的用户级 Native Messaging 目录，
+桥接请使用 deb/rpm 或 app bundle 安装的浏览器。
 
 然后在每个要驱动的浏览器里加载一次解压扩展：
 
@@ -170,7 +187,8 @@ Native Messaging 宿主。没有 .NET 9 SDK 时，它会从
 或 `{ "mode": "chrome-extension" }`。`raw status` 会显示当前桥、端口和扩展版本。
 如果升级后桥接没有连上，重启一次浏览器：它会在进程生命周期内缓存
 Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏览器后再运行一次
-安装脚本并加上 `-CleanLegacyHosts`，即可删除旧的 `host-*` 目录。
+安装脚本并加上 `--clean-legacy-hosts`（PowerShell 里是 `-CleanLegacyHosts`），
+即可删除旧的 `host-*` 目录。
 
 ## CLI
 
@@ -251,18 +269,20 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 
 ```bash
 npm run typecheck   # 严格 TypeScript 检查
-npm test            # 51 个单元测试
+npm test            # 55 个单元测试
 npm run build
 npm run smoke:browser
 npm run check       # 以上全部 + 浏览器冒烟测试
 ```
 
-CI 在 Ubuntu / Windows / macOS × Node 22/24/26 上跑完整套件，另有 Windows
-桥接宿主冒烟测试和依赖审计。
+CI 在 Ubuntu / Windows / macOS × Node 22/24/26 上跑完整套件，另有
+Windows / macOS / Linux 的桥接宿主冒烟测试和依赖审计。
 
 ## 已知限制
 
-1. **桥接安装脚本目前仅限 Windows。** 直连 CDP 模式跨平台。
+1. **Native Messaging 需要同一操作系统里的桌面浏览器。** 安装器覆盖
+   Windows / macOS / Linux 上的 Chrome 与 Edge 稳定版；Snap/Flatpak 沙箱浏览器
+   和“WSL 宿主 + Windows 浏览器”的组合不会自动注册。
 2. **单标签页单调试器。** Chromium 同一标签页只允许一个 CDP 调试客户端；
    并发挂载会互相 detach。
 3. **桥接模式不支持 `--space`。** 扩展无法创建

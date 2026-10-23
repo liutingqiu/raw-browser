@@ -13,9 +13,12 @@ values are returned only when a script explicitly calls a cookie API.
 - `host/`: a .NET native-messaging host. It exposes a token-protected CDP facade
   on loopback for the existing Raw browser runtime: Edge on `127.0.0.1:9333`,
   Chrome on `127.0.0.1:9334`.
-- `scripts/install-edge-bridge.ps1`: builds a versioned host, copies it to
-  `raw-edge-bridge.exe` and `raw-chrome-bridge.exe`, generates independent local
-  tokens, and registers both native hosts for the current Windows user.
+- `scripts/install-edge-bridge.mjs`: the cross-platform installer for macOS,
+  Linux and Windows (on Windows it delegates to the PowerShell script).
+- `scripts/install-edge-bridge.ps1`: the Windows installer. It builds or
+  downloads a versioned host, copies it to `raw-edge-bridge.exe` and
+  `raw-chrome-bridge.exe`, generates independent local tokens, and registers
+  both native hosts under HKCU.
 
 The extension exposes tabs across browser windows. Page-scoped CDP commands are
 forwarded without a method allowlist, including Network and Storage commands.
@@ -30,6 +33,19 @@ paused, the extension keeps no native port and cannot be driven remotely;
 
 ## Install
 
+The cross-platform installer is the normal entry point:
+
+```bash
+# from a source checkout, macOS / Linux / Windows
+node scripts/install-edge-bridge.mjs --browser both
+
+# global npm install, macOS / Linux
+node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs" --browser both
+```
+
+On Windows it delegates to the PowerShell installer, which registers the HKCU
+native-messaging keys. The PowerShell script also remains directly usable:
+
 ```powershell
 # both browsers (default)
 & .\scripts\install-edge-bridge.ps1 -Browser both
@@ -40,22 +56,41 @@ paused, the extension keeps no native port and cannot be driven remotely;
 ```
 
 The installer builds a self-contained host when the .NET 9 SDK is on `PATH`.
-Without the SDK it downloads `raw-bridge-host-win-x64.zip` from the matching
-GitHub release and verifies `SHA256SUMS.txt` when present. To use a host you
-built yourself, pass `-HostPath C:\path\to\raw-edge-bridge.exe`; to force a
-local build, pass `-BuildFromSource`. `-PreferPrebuilt` downloads the release
-asset even when an SDK is installed.
+Without the SDK it downloads the matching release asset
+(`raw-bridge-host-<rid>.tar.gz` on macOS/Linux, `raw-bridge-host-win-x64.zip` on
+Windows) and verifies `SHA256SUMS.txt` when present. To use a host you built
+yourself, pass `--host-path` (`-HostPath` in PowerShell); to force a local
+build, pass `--build-from-source` (`-BuildFromSource`). `--prefer-prebuilt`
+(`-PreferPrebuilt`) downloads the release asset even when an SDK is installed.
 
-The host lives at `~/.raw/edge-bridge/current/`. Upgrades replace the two
-executables in place, because a running Edge or Chrome caches the resolved
-native-messaging path for the life of the browser process. If you upgraded from
-an installer that used `host-<timestamp>` directories, the browser may keep
-using one of those until it restarts; restart it, then run the installer once
-with `-CleanLegacyHosts` to remove the old directories.
+On macOS and Linux the installer writes the native-messaging manifests to the
+browser's user directory:
+
+```text
+macOS Chrome: ~/Library/Application Support/Google/Chrome/NativeMessagingHosts
+macOS Edge:   ~/Library/Application Support/Microsoft Edge/NativeMessagingHosts
+Linux Chrome: ~/.config/google-chrome/NativeMessagingHosts
+Linux Edge:   ~/.config/microsoft-edge/NativeMessagingHosts
+```
+
+The host lives at `~/.raw/edge-bridge/current/` on every platform. Upgrades
+replace the executable in place, because a running Edge or Chrome caches the
+resolved native-messaging path for the life of the browser process. If you
+upgraded from an installer that used `host-<timestamp>` directories, the
+browser may keep using one of those until it restarts; restart it, then run the
+installer once with `--clean-legacy-hosts` (`-CleanLegacyHosts`) to remove the
+old directories.
+
+The browser and the host must run in the same operating system. A Windows
+browser cannot use a host installed inside WSL; install a Linux Chrome/Edge in
+WSL with WSLg and run the macOS/Linux installer there instead. Snap- and
+Flatpak-confined browsers do not read the user-level native-messaging directory;
+use a deb/rpm or app-bundle install for the bridge.
 
 Load the unpacked extension once in each browser you want to drive: open
 `edge://extensions` and/or `chrome://extensions`, enable Developer mode, choose
-**Load unpacked**, and select `edge-bridge\extension`. The extension ID must be
+**Load unpacked**, and select `edge-bridge/extension` (`edge-bridge\extension`
+on Windows). The extension ID must be
 `gfpadofoapicldopjkghnfbnbkljihmk`; the installer verifies the manifest key
 before registering anything.
 
@@ -117,9 +152,21 @@ Host logs are written to `~/.raw/edge-bridge.log` or
 
 Remove `mode` from `current.json` to return to the selected dedicated profile.
 Disable or remove **Raw Browser Bridge** from the browser's extensions page and
-remove the per-user registry keys:
+remove the per-user registration:
 
 ```text
-HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.raw.edge_bridge
-HKCU\Software\Google\Chrome\NativeMessagingHosts\com.raw.edge_bridge
+Windows (HKCU)
+  HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.raw.edge_bridge
+  HKCU\Software\Google\Chrome\NativeMessagingHosts\com.raw.edge_bridge
+
+macOS
+  ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.raw.edge_bridge.json
+  ~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/com.raw.edge_bridge.json
+
+Linux
+  ~/.config/google-chrome/NativeMessagingHosts/com.raw.edge_bridge.json
+  ~/.config/microsoft-edge/NativeMessagingHosts/com.raw.edge_bridge.json
 ```
+
+The previous host pair remains at `~/.raw/edge-bridge/previous/` after an
+upgrade; move it back to `current/` if a new host misbehaves.

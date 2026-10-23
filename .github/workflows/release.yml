@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: windows-latest
+  verify:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -22,54 +22,133 @@ jobs:
           node-version: 24.x
           cache: npm
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-
       - run: npm ci
       - run: node scripts/check-versions.mjs --tag ${{ github.ref_name }}
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: node scripts/smoke-browser.mjs
 
-      - name: publish the self-contained bridge host
+  host-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: publish the self-contained Windows host
         shell: pwsh
         run: |
           dotnet publish edge-bridge/host/RawEdgeBridge.csproj -c Release -r win-x64 `
             --self-contained true -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:EnableCompressionInSingleFile=true -o host-out --nologo
-
-      - name: pack the host and checksums
-        shell: pwsh
-        run: |
           New-Item -ItemType Directory -Path host-pack -Force | Out-Null
           Copy-Item host-out/raw-edge-bridge.exe host-pack/raw-edge-bridge.exe -Force
           Compress-Archive -Path host-pack/raw-edge-bridge.exe -DestinationPath raw-bridge-host-win-x64.zip -Force
-          $hash = (Get-FileHash raw-bridge-host-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  raw-bridge-host-win-x64.zip" | Set-Content SHA256SUMS.txt -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-win-x64
+          path: raw-bridge-host-win-x64.zip
+
+  host-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: publish the self-contained Linux hosts
+        shell: bash
+        run: |
+          for rid in linux-x64 linux-arm64; do
+            dotnet publish edge-bridge/host/RawEdgeBridge.csproj -c Release -r "$rid" \
+              --self-contained true -p:PublishSingleFile=true \
+              -p:IncludeNativeLibrariesForSelfExtract=true \
+              -p:EnableCompressionInSingleFile=true -o "host-out/$rid" --nologo
+            mkdir -p "host-pack/$rid"
+            cp "host-out/$rid/raw-edge-bridge" "host-pack/$rid/"
+            chmod +x "host-pack/$rid/raw-edge-bridge"
+            tar -czf "raw-bridge-host-$rid.tar.gz" -C "host-pack/$rid" raw-edge-bridge
+            test -s "raw-bridge-host-$rid.tar.gz"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-linux
+          path: raw-bridge-host-linux-*.tar.gz
+
+  host-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: publish the self-contained macOS hosts
+        shell: bash
+        run: |
+          for rid in osx-x64 osx-arm64; do
+            dotnet publish edge-bridge/host/RawEdgeBridge.csproj -c Release -r "$rid" \
+              --self-contained true -p:PublishSingleFile=true \
+              -p:IncludeNativeLibrariesForSelfExtract=true \
+              -p:EnableCompressionInSingleFile=true -o "host-out/$rid" --nologo
+            mkdir -p "host-pack/$rid"
+            cp "host-out/$rid/raw-edge-bridge" "host-pack/$rid/"
+            chmod +x "host-pack/$rid/raw-edge-bridge"
+            tar -czf "raw-bridge-host-$rid.tar.gz" -C "host-pack/$rid" raw-edge-bridge
+            test -s "raw-bridge-host-$rid.tar.gz"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-macos
+          path: raw-bridge-host-osx-*.tar.gz
+
+  release:
+    needs: [verify, host-windows, host-linux, host-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: checksums for every host archive
+        run: |
+          cd release-assets
+          sha256sum raw-bridge-host-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: pack the npm tarball
-        run: npm pack
-
-      - name: add a stable tarball name
-        shell: pwsh
         run: |
-          $tarball = (Get-ChildItem *.tgz | Select-Object -First 1).Name
-          Copy-Item $tarball raw-browser.tgz -Force
+          npm pack
+          tarball=$(ls raw-browser-*.tgz | head -1)
+          cp "$tarball" raw-browser.tgz
 
       - name: create the release and upload assets
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ github.ref_name }}"
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "raw-browser $tag" --generate-notes
-          }
-          $tarball = (Get-ChildItem *.tgz | Select-Object -First 1).Name
-          gh release upload $tag raw-bridge-host-win-x64.zip SHA256SUMS.txt $tarball raw-browser.tgz --clobber
+          tag="${{ github.ref_name }}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "raw-browser $tag" --generate-notes
+          gh release upload "$tag" release-assets/*.zip release-assets/*.tar.gz release-assets/SHA256SUMS.txt raw-browser.tgz --clobber
 
   npm:
     needs: release

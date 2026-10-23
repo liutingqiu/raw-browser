@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 
-const string Version = "0.6.2";
+const string Version = "0.7.0";
 
 var processName = Process.GetCurrentProcess().ProcessName;
 string? forcedBrowser = Environment.GetEnvironmentVariable("RAW_BRIDGE_BROWSER");
@@ -80,10 +80,17 @@ var port = config?["port"]?.GetValue<int>() ?? defaultPort;
 // and Chrome builds have different process names so they never kill each other.
 if (Console.IsInputRedirected)
 {
-    foreach (var stale in Process.GetProcessesByName(processName))
+    try
     {
-        if (stale.Id == Environment.ProcessId) continue;
-        try { stale.Kill(); stale.WaitForExit(2000); } catch { /* already gone */ }
+        foreach (var stale in Process.GetProcessesByName(processName))
+        {
+            if (stale.Id == Environment.ProcessId) continue;
+            try { stale.Kill(); stale.WaitForExit(2000); } catch { /* already gone */ }
+        }
+    }
+    catch
+    {
+        // Process enumeration is best-effort; macOS and Linux may restrict it.
     }
 }
 

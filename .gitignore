@@ -28,4 +28,6 @@ demo/.frames/
 host-out/
 host-pack/
 raw-bridge-host-win-x64.zip
+raw-bridge-host-*.zip
+raw-bridge-host-*.tar.gz
 SHA256SUMS.txt

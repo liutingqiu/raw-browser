@@ -20,9 +20,9 @@ Run `npm run smoke:browser` when changing browser automation. It opens the
 dedicated local browser profile and verifies same-origin iframe interaction,
 downloads, screenshots and CPU-timeout termination.
 
-Run `npm run smoke:bridge` on Windows (with the .NET 9 SDK) when changing the
-native host or the extension. It builds the host and exercises the bridge
-protocol.
+Run `npm run smoke:bridge` on Windows, macOS or Linux (with the .NET 9 SDK)
+when changing the native host or the extension. It builds the host and
+exercises the bridge protocol.
 
 Add focused `node:test` coverage for protocol serialization, context boundaries,
 permissions, and filesystem behavior. Keep generated files out of commits;
