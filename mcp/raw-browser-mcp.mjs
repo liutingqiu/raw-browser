@@ -427,7 +427,7 @@ async function handle(message) {
     reply(id, {
       protocolVersion: params?.protocolVersion || "2024-11-05",
       capabilities: { tools: {} },
-      serverInfo: { name: "raw-browser", version: "0.6.0" },
+      serverInfo: { name: "raw-browser", version: "0.6.1" },
     });
     return;
   }

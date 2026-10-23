@@ -3,6 +3,21 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [0.6.1] - 2026-10-23
+
+### Changed
+
+- Rebuilt the demo, social card and architecture diagram around a browser and
+  selection visual identity: paper, ink, browser chrome and a single signal
+  orange. No gradients.
+- `demo/dashboard.html` is now a browser workbench with a live `run.mjs` panel;
+  the recorded demo highlights each script line as it executes.
+
+### Fixed
+
+- `scripts/smoke-browser.mjs` allows a cold browser 60 seconds to launch and no
+  longer masks the real failure when a failed-launch profile cannot be removed.
+
 ## [0.6.0] - 2026-10-23
 
 ### Added
@@ -178,7 +193,8 @@ follow Semantic Versioning.
 - Strict TypeScript checking, a locked development toolchain, and full CLI protocol, setup, and permission smoke tests now gate publication.
 - Browser smoke testing uses a disposable profile and covers forms, iframes, downloads, screenshots, isolated spaces, cleanup, and CPU timeouts.
 
-[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.1
 [0.6.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.0
 [0.5.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.5.1
 [0.5.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.5.0
