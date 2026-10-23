@@ -63,6 +63,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const HEADLESS = process.env.RAW_BROWSER_HEADLESS === "1";
 const PROFILE = process.env.RAW_BROWSER_PROFILE || BROWSER_PROFILE;
 const BROWSER_MARKER = path.join(PROFILE, ".raw-browser.json");
+const LAUNCH_TIMEOUT_MS = Number(process.env.RAW_BROWSER_LAUNCH_TIMEOUT_MS) || 30_000;
 
 function debuggerFetch(pathname: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -297,7 +298,7 @@ async function launchBrowser(): Promise<void> {
   const child = spawn(exe, args, { detached: true, stdio: "ignore" });
   child.unref();
 
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 400));
     const info = await debuggerAlive();
@@ -313,10 +314,11 @@ async function launchBrowser(): Promise<void> {
       return;
     }
   }
+  const seconds = Math.round(LAUNCH_TIMEOUT_MS / 1000);
   throw new Error(
     EXTERNAL_BRIDGE
-      ? `${BRIDGE_BROWSER} did not expose the Raw bridge on port ${PORT} within 30s. Check that the Raw Browser Bridge extension is loaded in that browser and the native host is installed.`
-      : `browser did not expose a debugger on port ${PORT} within 30s`,
+      ? `${BRIDGE_BROWSER} did not expose the Raw bridge on port ${PORT} within ${seconds}s. Check that the Raw Browser Bridge extension is loaded in that browser and the native host is installed.`
+      : `browser did not expose a debugger on port ${PORT} within ${seconds}s`,
   );
 }
 

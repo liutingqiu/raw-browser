@@ -26,7 +26,7 @@ const ASSETS = path.join(ROOT, "assets");
 const args = process.argv.slice(2);
 const headless = args.includes("--headless");
 const keep = args.includes("--keep");
-const width = 1200;
+const width = 1280;
 const height = 800;
 
 function fail(message) {
@@ -69,6 +69,7 @@ await ui.cdpSend('Emulation.setDeviceMetricsOverride', {
   width: ${width}, height: ${height}, deviceScaleFactor: 1, mobile: false,
 });
 await ui.sleep(450);
+await ui.eval('window.__demoScript(1)');
 
 const FRAMES = ${JSON.stringify(frames)};
 const timings = [];
@@ -97,7 +98,8 @@ async function moveTo(selector, steps = 9) {
   await snap();
   return target;
 }
-async function clickAt(selector) {
+async function clickAt(selector, line) {
+  if (line) await ui.eval('window.__demoScript(' + line + ')');
   const target = await moveTo(selector);
   await ui.eval('window.__demoClick(' + target.x + ',' + target.y + ')');
   await ui.click(selector);
@@ -108,8 +110,10 @@ await hold(10, 100);
 const snapshot = await ui.snapshot({ scope: 'viewport' });
 const elements = snapshot.split('\\n').filter((line) => /^\\[\\d+\\]/.test(line)).length;
 console.log('snapshot: ' + elements + ' interactive elements, ' + snapshot.length + ' chars');
+await ui.eval('window.__demoLog(' + JSON.stringify('snapshot · ' + elements + ' interactive') + ')');
 
-await clickAt('input[placeholder="Search orders"]');
+await clickAt('input[placeholder="Search orders"]', 3);
+await ui.eval('window.__demoScript(4)');
 for (const ch of 'Initech') {
   await ui.typeText(ch);
   await sleep(85);
@@ -118,17 +122,25 @@ for (const ch of 'Initech') {
 await ui.sleep(220);
 await snap();
 
-await clickAt('text=Initech');
+await ui.eval('window.__demoScript(6)');
+await moveTo('text=Initech');
+await ui.eval('window.__demoScript(7)');
+await ui.click('text=Initech');
+await snap();
 await hold(8, 120);
 
+await ui.eval('window.__demoScript(9)');
 const exportButton = await moveTo('#export');
+await ui.eval('window.__demoScript(10)');
 await ui.eval('window.__demoClick(' + exportButton.x + ',' + exportButton.y + ')');
 const download = await ui.waitForDownload(() => ui.click('#export'), { timeoutMs: 20000 });
+await ui.eval('window.__demoScript(12)');
+await ui.eval('window.__demoLog(' + JSON.stringify('downloaded · ' + download.filename) + ')');
 await snap();
 console.log('downloaded: ' + download.filename + ' (' + download.bytes + ' bytes)');
 await hold(12, 110);
 
-await ui.eval('window.__demoCursor(1060, 700)');
+await ui.eval('window.__demoCursor(1180, 730)');
 await hold(6, 120);
 await ui.closeTab();
 console.log('TIMINGS:' + JSON.stringify(timings));
@@ -167,7 +179,7 @@ async function encode(directory, frames, timings) {
   await run("ffmpeg", [
     "-y", "-hide_banner", "-loglevel", "error",
     "-f", "concat", "-safe", "0", "-i", listFile,
-    "-vf", "fps=15,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160[p];[b][p]paletteuse=dither=sierra2_4a",
+    "-vf", "fps=15,scale=1200:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=192[p];[b][p]paletteuse=dither=sierra2_4a",
     "-loop", "0", gif,
   ]);
 

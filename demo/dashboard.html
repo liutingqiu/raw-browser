@@ -6,234 +6,343 @@
 <title>Acme Ops — Orders</title>
 <style>
   :root {
-    --ink: #0f172a;
-    --muted: #64748b;
-    --line: #e2e8f0;
-    --bg: #eef2f9;
-    --card: #ffffff;
-    --blue: #2563eb;
-    --blue-soft: #dbeafe;
-    --green: #059669;
-    --green-soft: #d1fae5;
-    --amber: #b45309;
-    --amber-soft: #fef3c7;
-    --gray-soft: #e2e8f0;
+    --paper: #efeee9;
+    --paper-2: #fbfaf7;
+    --ink: #141518;
+    --chrome: #d5d8de;
+    --chrome-2: #c2c7cf;
+    --muted: #6b6f76;
+    --line: #ddd9d0;
+    --signal: #ff4d1c;
+    --signal-soft: #ffe2d8;
+    --dark: #1b1d21;
+    --dark-2: #141518;
+    --dark-line: #2c2f35;
+    --green: #2e7d5b;
+    --amber: #b26a00;
+    --display: "Bahnschrift Condensed", "Bahnschrift", "Arial Narrow", "Segoe UI", sans-serif;
+    --body: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
     margin: 0;
-    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Inter, Roboto, sans-serif;
-    background: radial-gradient(1200px 600px at 80% -10%, #dbeafe 0%, transparent 60%), var(--bg);
+    font-family: var(--body);
+    background: var(--paper);
     color: var(--ink);
     -webkit-font-smoothing: antialiased;
+    display: grid;
+    place-items: center;
+    padding: 28px;
   }
-  .frame {
-    max-width: 1120px;
-    min-height: calc(100vh - 56px);
-    margin: 28px auto;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    box-shadow: 0 24px 60px -24px rgba(15, 23, 42, .35), 0 2px 8px rgba(15, 23, 42, .04);
-    overflow: hidden;
+
+  /* browser window */
+  .browser {
+    width: 1220px;
+    height: 744px;
+    border: 2px solid var(--ink);
+    background: var(--paper-2);
+    box-shadow: 10px 10px 0 var(--chrome);
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
-  .topbar {
+  .tabs {
+    height: 52px;
+    flex: none;
+    background: var(--chrome);
+    border-bottom: 2px solid var(--ink);
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    padding: 0 14px;
+  }
+  .tab {
+    height: 36px;
+    padding: 0 16px;
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 16px 24px;
-    background: linear-gradient(90deg, #0f172a, #1e293b);
-    color: #f8fafc;
-  }
-  .mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-    background: #2563eb;
-    font-weight: 800;
-    font-size: 15px;
-    letter-spacing: -.04em;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
-  }
-  .brand { font-weight: 650; letter-spacing: -.01em; }
-  .brand span { color: #94a3b8; font-weight: 500; }
-  .topbar .spacer { flex: 1; }
-  .live {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 12px; font-weight: 600; color: #bbf7d0;
-    background: rgba(16, 185, 129, .14);
-    border: 1px solid rgba(16, 185, 129, .35);
-    padding: 6px 11px; border-radius: 999px;
-  }
-  .live i { width: 7px; height: 7px; border-radius: 50%; background: #34d399; display: block; }
-  .body { padding: 28px 32px 22px; flex: 1; }
-  .head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 22px; }
-  .head h1 { margin: 0; font-size: 30px; letter-spacing: -.03em; }
-  .head p { margin: 0 0 4px; color: var(--muted); font-size: 14px; }
-  .head .spacer { flex: 1; }
-  .count { font-size: 13px; color: var(--muted); }
-  .count b { color: var(--ink); }
-  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
-  .search {
-    flex: 1;
-    position: relative;
-  }
-  .search svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); opacity: .45; }
-  .search input {
-    width: 100%; height: 42px; padding: 0 14px 0 40px;
-    border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe;
-    font-size: 14px; color: var(--ink); outline: none;
-    transition: border-color .15s, box-shadow .15s;
-  }
-  .search input:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); background: #fff; }
-  select {
-    height: 42px; padding: 0 34px 0 13px; border: 1px solid var(--line); border-radius: 10px;
-    background: #fbfcfe url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
-    font-size: 14px; color: var(--ink); appearance: none; outline: none;
-  }
-  select:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
-  button.primary {
-    height: 42px; padding: 0 18px; border: 0; border-radius: 10px; cursor: pointer;
-    background: var(--blue); color: #fff; font-size: 14px; font-weight: 600;
-    box-shadow: 0 8px 18px -8px rgba(37, 99, 235, .8);
-    transition: transform .12s, background .12s, box-shadow .12s;
+    gap: 8px;
+    font: 600 12.5px var(--body);
+    color: #3e434b;
     white-space: nowrap;
   }
-  button.primary:hover { background: #1d4ed8; transform: translateY(-1px); }
-  button.primary:active { transform: translateY(0); box-shadow: 0 4px 10px -6px rgba(37,99,235,.8); }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .tab.active {
+    height: 42px;
+    background: var(--paper-2);
+    border: 2px solid var(--ink);
+    border-bottom: 0;
+    border-top: 3px solid var(--signal);
+    color: var(--ink);
+    margin-bottom: -2px;
+    padding-top: 3px;
+  }
+  .tab .tabdot { width: 7px; height: 7px; background: var(--signal); display: block; }
+  .tabs .spacer { flex: 1; }
+  .win-controls { display: flex; gap: 5px; padding-bottom: 17px; }
+  .win-controls i { width: 11px; height: 11px; border: 1.5px solid var(--ink); display: block; }
+
+  .address {
+    height: 44px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    background: var(--paper-2);
+    border-bottom: 2px solid var(--ink);
+  }
+  .lock { width: 13px; height: 15px; border: 1.5px solid var(--ink); border-radius: 2px; position: relative; flex: none; }
+  .lock::before { content: ""; position: absolute; left: 2px; top: -6px; width: 7px; height: 7px; border: 1.5px solid var(--ink); border-bottom: 0; border-radius: 5px 5px 0 0; }
+  .url {
+    flex: 1;
+    height: 30px;
+    border: 1.5px solid var(--chrome-2);
+    background: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font: 12px var(--mono);
+    color: #3e434b;
+  }
+  .url b { color: var(--ink); font-weight: 600; }
+  .connected {
+    display: flex; align-items: center; gap: 7px;
+    font: 600 10.5px var(--mono); color: var(--muted); letter-spacing: .04em;
+  }
+  .connected i { width: 8px; height: 8px; background: var(--signal); display: block; }
+
+  .content { flex: 1; display: flex; min-height: 0; }
+
+  /* page */
+  .page { width: 62%; padding: 26px 30px 18px; display: flex; flex-direction: column; min-width: 0; }
+  .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; }
+  .page-head h1 {
+    margin: 0;
+    font-family: var(--display);
+    font-stretch: condensed;
+    font-weight: 700;
+    font-size: 42px;
+    line-height: .95;
+    letter-spacing: -.01em;
+  }
+  .page-head .sub { font: 11px var(--mono); color: var(--muted); margin-bottom: 3px; }
+  .page-head .spacer { flex: 1; }
+  .count { font: 11px var(--mono); color: var(--muted); text-align: right; }
+  .count b { display: block; font: 700 22px var(--display); color: var(--ink); letter-spacing: .01em; }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 14px; }
+  .search { flex: 1; position: relative; }
+  .search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); }
+  .search input {
+    width: 100%; height: 38px; padding: 0 12px 0 34px;
+    border: 1.5px solid #c9c5bc; background: #fff; border-radius: 3px;
+    font: 13px var(--body); color: var(--ink); outline: none;
+  }
+  .search input:focus { border-color: var(--ink); box-shadow: 3px 3px 0 var(--signal-soft); }
+  select {
+    height: 38px; padding: 0 30px 0 11px; border: 1.5px solid #c9c5bc; border-radius: 3px;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%23141518' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+    font: 13px var(--body); color: var(--ink); appearance: none; outline: none;
+  }
+  button.primary {
+    height: 38px; padding: 0 16px; border: 1.5px solid var(--ink); border-radius: 3px; cursor: pointer;
+    background: var(--signal); color: var(--ink); font: 700 12.5px var(--body);
+    box-shadow: 3px 3px 0 var(--ink); white-space: nowrap;
+    transition: transform .1s, box-shadow .1s;
+  }
+  button.primary:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+  button.primary:active { transform: translate(1px, 1px); box-shadow: 2px 2px 0 var(--ink); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
-    text-align: left; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--muted); font-weight: 650; padding: 10px 12px; border-bottom: 1px solid var(--line);
+    text-align: left; font: 600 10px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); padding: 8px 10px; border-bottom: 2px solid var(--ink);
   }
-  tbody td { padding: 13px 12px; border-bottom: 1px solid #f1f5f9; }
-  tbody tr { cursor: pointer; transition: background .12s; }
-  tbody tr:hover { background: #f8fafc; }
-  tbody tr.selected { background: var(--blue-soft); }
-  tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--blue); }
-  .mono { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
-  .amount { font-weight: 600; }
-  .pill {
+  tbody td { padding: 10px; border-bottom: 1px solid var(--line); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #f5f3ee; }
+  tbody tr.selected { background: var(--signal-soft); box-shadow: inset 3px 0 0 var(--signal); }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .amount { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+  .status i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+  .paid i { background: var(--green); }
+  .pending i { background: var(--amber); }
+  .refunded i { background: #8a8e95; }
+  .empty { padding: 28px 10px; text-align: center; color: var(--muted); font: 12px var(--mono); display: none; }
+  .page-foot {
+    margin-top: auto; padding-top: 12px; display: flex; align-items: center; gap: 10px;
+    border-top: 1px solid var(--line); font: 10.5px var(--mono); color: var(--muted);
+  }
+  .page-foot .spacer { flex: 1; }
+  .raw-chip {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 999px;
+    border: 1.5px solid var(--ink); padding: 4px 7px; background: var(--paper-2);
+    font: 700 10px var(--mono); color: var(--ink);
   }
-  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
-  .paid { color: var(--green); background: var(--green-soft); }
-  .pending { color: var(--amber); background: var(--amber-soft); }
-  .refunded { color: #475569; background: var(--gray-soft); }
-  .empty { padding: 34px 12px; text-align: center; color: var(--muted); display: none; }
-  .foot {
-    display: flex; align-items: center; gap: 12px;
-    padding: 14px 32px 18px; color: var(--muted); font-size: 12px;
+  .raw-chip b { color: var(--signal); }
+
+  /* script panel */
+  .script {
+    width: 38%;
+    background: var(--dark);
+    color: #e8e6e1;
+    border-left: 2px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
   }
-  .foot .spacer { flex: 1; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11.5px;
-    background: #0f172a; color: #cbd5e1; padding: 7px 11px; border-radius: 8px;
+  .script-head {
+    height: 44px; flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 0 14px; border-bottom: 1px solid var(--dark-line);
+    font: 600 11.5px var(--mono); color: #c9c6bf;
   }
-  .chip b { color: #93c5fd; font-weight: 600; }
-  .toast {
-    position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 18px);
-    background: #0f172a; color: #f8fafc; padding: 12px 18px; border-radius: 12px;
-    font-size: 13.5px; box-shadow: 0 18px 40px -16px rgba(15,23,42,.6);
-    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
-    display: flex; align-items: center; gap: 10px;
+  .script-head .dot { width: 8px; height: 8px; background: var(--signal); display: block; }
+  .script-head .spacer { flex: 1; }
+  .script-head .live { color: var(--signal); font-size: 10px; letter-spacing: .08em; }
+  .code { flex: 1; padding: 12px 0; overflow: hidden; }
+  .code-line {
+    display: flex; gap: 10px; padding: 2px 14px 2px 0;
+    border-left: 3px solid transparent;
+    font: 13px/1.72 var(--mono); color: #c9c6bf; white-space: pre;
   }
-  .toast.show { opacity: 1; transform: translate(-50%, 0); }
-  .toast .tick {
-    width: 18px; height: 18px; border-radius: 50%; background: #10b981;
-    display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: #052e16; font-weight: 900;
+  .code-line .ln { width: 22px; flex: none; text-align: right; color: #5e636c; font-size: 11px; line-height: 22.4px; }
+  .code-line.active { background: rgba(255, 77, 28, .16); border-left-color: var(--signal); color: #fff; }
+  .code-line.active .ln { color: var(--signal); }
+  .code-line.done { color: #7e838b; }
+  .code .kw { color: #ff9b7d; }
+  .code .str { color: #b9d99a; }
+  .code .fn { color: #9ec4e8; }
+  .code .cm { color: #626871; }
+  .console {
+    flex: none; min-height: 96px; border-top: 1px solid var(--dark-line);
+    padding: 10px 14px; font: 11px/1.7 var(--mono); color: #8e939b;
   }
-  /* demo cursor overlay */
+  .console .line { display: flex; gap: 8px; }
+  .console .line::before { content: "›"; color: var(--signal); }
+  .console .line.new { color: #e8e6e1; }
+  .script-foot {
+    flex: none; height: 34px; display: flex; align-items: center; gap: 8px;
+    padding: 0 14px; border-top: 1px solid var(--dark-line);
+    font: 10px var(--mono); color: #6d727b;
+  }
+  .script-foot b { color: var(--signal); font-weight: 600; }
+
+  /* overlay */
   #cursor {
-    position: fixed; left: 0; top: 0; width: 18px; height: 18px; margin: -9px 0 0 -9px;
-    border-radius: 50%; background: rgba(37, 99, 235, .9);
-    border: 3px solid #fff; box-shadow: 0 4px 14px rgba(15, 23, 42, .35), 0 0 0 1px rgba(37,99,235,.35);
+    position: fixed; left: 0; top: 0; width: 22px; height: 26px;
     pointer-events: none; z-index: 9999; opacity: 0;
-    transition: transform .14s cubic-bezier(.2,.8,.2,1), opacity .2s;
+    transition: transform .12s cubic-bezier(.2,.8,.2,1), opacity .18s;
+    filter: drop-shadow(1px 2px 0 rgba(20, 21, 24, .28));
   }
   #cursor.on { opacity: 1; }
-  .ripple {
-    position: fixed; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
-    border: 2px solid rgba(37, 99, 235, .8); pointer-events: none; z-index: 9998;
-    animation: ripple .5s ease-out forwards;
+  .marquee-pulse {
+    position: fixed; width: 24px; height: 24px; margin: -12px 0 0 -12px;
+    border: 2px solid var(--signal); pointer-events: none; z-index: 9998;
+    animation: marquee .48s ease-out forwards;
   }
-  @keyframes ripple {
-    0% { transform: scale(.6); opacity: .9; }
-    100% { transform: scale(2.6); opacity: 0; }
+  @keyframes marquee {
+    0% { transform: scale(.55); opacity: 1; }
+    100% { transform: scale(2.35); opacity: 0; }
   }
 </style>
 </head>
 <body>
-  <div class="frame">
-    <div class="topbar">
-      <span class="mark">raw</span>
-      <span class="brand">Acme Ops <span>/ Orders</span></span>
-      <span class="spacer"></span>
-      <span class="live"><i></i> live</span>
+  <div class="browser">
+    <div class="tabs">
+      <div class="tab active"><span class="tabdot"></span>Acme Ops</div>
+      <div class="tab">raw — run.mjs</div>
+      <div class="spacer"></div>
+      <div class="win-controls"><i></i><i></i><i></i></div>
     </div>
 
-    <div class="body">
-      <div class="head">
-        <div>
-          <h1>Orders</h1>
-          <p>One script. Search, select, export.</p>
+    <div class="address">
+      <span class="lock"></span>
+      <div class="url">app.local/<b>orders</b></div>
+      <span class="connected"><i></i>raw connected</span>
+    </div>
+
+    <div class="content">
+      <section class="page">
+        <div class="page-head">
+          <div>
+            <h1>Orders</h1>
+            <div class="sub">Acme Ops / 2026-10-23</div>
+          </div>
+          <span class="spacer"></span>
+          <div class="count"><b id="visible">8</b>orders shown</div>
         </div>
-        <span class="spacer"></span>
-        <span class="count"><b id="visible">8</b> of 8 orders</span>
-      </div>
 
-      <div class="toolbar">
-        <label class="search">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f172a" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
-          <input id="search" type="text" placeholder="Search orders" autocomplete="off" spellcheck="false" />
-        </label>
-        <select id="status" aria-label="Status">
-          <option value="">All statuses</option>
-          <option value="Paid">Paid</option>
-          <option value="Pending">Pending</option>
-          <option value="Refunded">Refunded</option>
-        </select>
-        <button class="primary" id="export">Export CSV</button>
-      </div>
+        <div class="toolbar">
+          <label class="search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#141518" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+            <input id="search" type="text" placeholder="Search orders" autocomplete="off" spellcheck="false" />
+          </label>
+          <select id="status" aria-label="Status">
+            <option value="">All statuses</option>
+            <option value="Paid">Paid</option>
+            <option value="Pending">Pending</option>
+            <option value="Refunded">Refunded</option>
+          </select>
+          <button class="primary" id="export">Export CSV</button>
+        </div>
 
-      <table>
-        <thead>
-          <tr><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th></tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-      <div class="empty" id="empty">No orders match this filter.</div>
-    </div>
+        <table>
+          <thead>
+            <tr><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="empty" id="empty">No orders match this filter.</div>
 
-    <div class="foot">
-      <span class="chip"><b>raw</b> run demo.mjs</span>
-      <span>1 script &middot; 6 actions &middot; 0 model round-trips</span>
-      <span class="spacer"></span>
-      <span>127.0.0.1 demo</span>
+        <div class="page-foot">
+          <span class="raw-chip"><b>raw</b> one script</span>
+          <span id="state">ready</span>
+          <span class="spacer"></span>
+          <span>127.0.0.1 demo</span>
+        </div>
+      </section>
+
+      <aside class="script">
+        <div class="script-head"><span class="dot"></span>run.mjs<span class="spacer"></span><span class="live">LIVE</span></div>
+        <div class="code" id="code">
+          <div class="code-line" data-line="1"><span class="ln">1</span><span><span class="kw">const</span> p = <span class="kw">await</span> page.<span class="fn">newTab</span>(url)</span></div>
+          <div class="code-line" data-line="2"><span class="ln">2</span><span></span></div>
+          <div class="code-line" data-line="3"><span class="ln">3</span><span><span class="kw">await</span> p.<span class="fn">click</span>(<span class="str">'input[placeholder="Search"]'</span>)</span></div>
+          <div class="code-line" data-line="4"><span class="ln">4</span><span><span class="kw">await</span> p.<span class="fn">typeText</span>(<span class="str">'Initech'</span>)</span></div>
+          <div class="code-line" data-line="5"><span class="ln">5</span><span></span></div>
+          <div class="code-line" data-line="6"><span class="ln">6</span><span><span class="kw">const</span> row = <span class="kw">await</span> p.<span class="fn">find</span>(<span class="str">'text=Initech'</span>)</span></div>
+          <div class="code-line" data-line="7"><span class="ln">7</span><span><span class="kw">await</span> p.<span class="fn">click</span>(<span class="str">'text=Initech'</span>)</span></div>
+          <div class="code-line" data-line="8"><span class="ln">8</span><span></span></div>
+          <div class="code-line" data-line="9"><span class="ln">9</span><span><span class="kw">const</span> file = <span class="kw">await</span> p.<span class="fn">waitForDownload</span>(() =&gt;</span></div>
+          <div class="code-line" data-line="10"><span class="ln">10</span><span>  p.<span class="fn">click</span>(<span class="str">'#export'</span>))</span></div>
+          <div class="code-line" data-line="11"><span class="ln">11</span><span></span></div>
+          <div class="code-line" data-line="12"><span class="ln">12</span><span><span class="fn">console</span>.<span class="fn">log</span>(file.filename)</span></div>
+        </div>
+        <div class="console" id="console"></div>
+        <div class="script-foot"><b>1</b> script <span>/</span> <b>6</b> actions <span>/</span> 0 model round-trips</div>
+      </aside>
     </div>
   </div>
 
-  <div class="toast" id="toast"><span class="tick">✓</span><span id="toast-text">Exported</span></div>
-  <div id="cursor"></div>
+  <div id="cursor">
+    <svg width="22" height="26" viewBox="0 0 22 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M2.5 2.2V20.4L8.1 15.7L11.6 24.2L15.2 22.7L11.7 14.4H19.2L2.5 2.2Z" fill="#FF4D1C" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"/>
+    </svg>
+  </div>
 
 <script>
   const DATA = [
-    { id: '1042', customer: 'Acme Corp',        amount: 1240.00, status: 'Paid',     date: 'Oct 21' },
-    { id: '1043', customer: 'Globex',           amount:  860.00, status: 'Pending',  date: 'Oct 21' },
-    { id: '1044', customer: 'Initech',          amount: 2310.00, status: 'Paid',     date: 'Oct 20' },
-    { id: '1045', customer: 'Umbrella Group',   amount:  540.00, status: 'Refunded', date: 'Oct 20' },
-    { id: '1046', customer: 'Hooli',            amount: 1790.00, status: 'Paid',     date: 'Oct 19' },
-    { id: '1047', customer: 'Stark Industries', amount: 3420.00, status: 'Pending',  date: 'Oct 19' },
-    { id: '1048', customer: 'Wayne Enterprises',amount:  980.00, status: 'Paid',     date: 'Oct 18' },
-    { id: '1049', customer: 'Cyberdyne',        amount: 1150.00, status: 'Paid',     date: 'Oct 18' }
+    { id: '1042', customer: 'Acme Corp',         amount: 1240.00, status: 'Paid',     date: 'Oct 21' },
+    { id: '1043', customer: 'Globex',            amount:  860.00, status: 'Pending',  date: 'Oct 21' },
+    { id: '1044', customer: 'Initech',           amount: 2310.00, status: 'Paid',     date: 'Oct 20' },
+    { id: '1045', customer: 'Umbrella Group',    amount:  540.00, status: 'Refunded', date: 'Oct 20' },
+    { id: '1046', customer: 'Hooli',             amount: 1790.00, status: 'Paid',     date: 'Oct 19' },
+    { id: '1047', customer: 'Stark Industries',  amount: 3420.00, status: 'Pending',  date: 'Oct 19' },
+    { id: '1048', customer: 'Wayne Enterprises', amount:  980.00, status: 'Paid',     date: 'Oct 18' },
+    { id: '1049', customer: 'Cyberdyne',         amount: 1150.00, status: 'Paid',     date: 'Oct 18' }
   ];
 
   const rowsEl = document.getElementById('rows');
@@ -241,26 +350,31 @@
   const visibleEl = document.getElementById('visible');
   const searchEl = document.getElementById('search');
   const statusEl = document.getElementById('status');
-  const toastEl = document.getElementById('toast');
-  const toastText = document.getElementById('toast-text');
+  const stateEl = document.getElementById('state');
+  const consoleEl = document.getElementById('console');
+  const codeEl = document.getElementById('code');
   let selected = null;
 
   const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const slug = (s) => s.toLowerCase();
 
-  function render() {
+  function filtered() {
     const q = slug(searchEl.value.trim());
     const status = statusEl.value;
-    const list = DATA.filter((o) =>
+    return DATA.filter((o) =>
       (!status || o.status === status) &&
       (!q || o.id.includes(q) || slug(o.customer).includes(q) || slug(o.status).includes(q))
     );
+  }
+
+  function render() {
+    const list = filtered();
     rowsEl.innerHTML = list.map((o) => `
       <tr data-id="${o.id}" class="${selected === o.id ? 'selected' : ''}">
         <td class="mono">#${o.id}</td>
         <td>${o.customer}</td>
-        <td class="mono amount">${money(o.amount)}</td>
-        <td><span class="pill ${o.status.toLowerCase()}">${o.status}</span></td>
+        <td class="amount">${money(o.amount)}</td>
+        <td><span class="status ${o.status.toLowerCase()}"><i></i>${o.status}</span></td>
         <td class="mono">${o.date}</td>
       </tr>`).join('');
     emptyEl.style.display = list.length ? 'none' : 'block';
@@ -269,29 +383,16 @@
       tr.addEventListener('click', () => {
         selected = selected === tr.dataset.id ? null : tr.dataset.id;
         render();
-        if (selected) toast(`Order #${selected} selected`);
+        if (selected) stateEl.textContent = 'order #' + selected;
       });
     }
-  }
-
-  let toastTimer;
-  function toast(message) {
-    toastText.textContent = message;
-    toastEl.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
   }
 
   searchEl.addEventListener('input', render);
   statusEl.addEventListener('change', render);
 
   document.getElementById('export').addEventListener('click', () => {
-    const q = slug(searchEl.value.trim());
-    const status = statusEl.value;
-    const list = DATA.filter((o) =>
-      (!status || o.status === status) &&
-      (!q || o.id.includes(q) || slug(o.customer).includes(q) || slug(o.status).includes(q))
-    );
+    const list = filtered();
     const csv = ['order,customer,amount,status,date']
       .concat(list.map((o) => `${o.id},${o.customer},${o.amount.toFixed(2)},${o.status},${o.date}`))
       .join('\n');
@@ -303,7 +404,7 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    toast(`Exported ${list.length} order${list.length === 1 ? '' : 's'} to orders.csv`);
+    stateEl.textContent = 'exported ' + list.length;
   });
 
   const cursorEl = document.getElementById('cursor');
@@ -314,11 +415,26 @@
   window.__demoClick = (x, y) => {
     window.__demoCursor(x, y);
     const r = document.createElement('div');
-    r.className = 'ripple';
+    r.className = 'marquee-pulse';
     r.style.left = x + 'px';
     r.style.top = y + 'px';
     document.body.appendChild(r);
     setTimeout(() => r.remove(), 520);
+  };
+  window.__demoScript = (line) => {
+    const lines = codeEl.querySelectorAll('.code-line');
+    for (const el of lines) {
+      const n = Number(el.dataset.line);
+      el.classList.toggle('active', n === line);
+      el.classList.toggle('done', n < line);
+    }
+  };
+  window.__demoLog = (text) => {
+    const div = document.createElement('div');
+    div.className = 'line new';
+    div.textContent = text;
+    consoleEl.appendChild(div);
+    while (consoleEl.children.length > 4) consoleEl.firstElementChild.remove();
   };
 
   render();
