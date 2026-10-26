@@ -26,8 +26,8 @@ const ASSETS = path.join(ROOT, "assets");
 const args = process.argv.slice(2);
 const headless = args.includes("--headless");
 const keep = args.includes("--keep");
-const width = 1280;
-const height = 800;
+const width = 1400;
+const height = 1000;
 
 function fail(message) {
   console.error(`demo: ${message}`);
@@ -69,7 +69,6 @@ await ui.cdpSend('Emulation.setDeviceMetricsOverride', {
   width: ${width}, height: ${height}, deviceScaleFactor: 1, mobile: false,
 });
 await ui.sleep(450);
-await ui.eval('window.__demoScript(1)');
 
 const FRAMES = ${JSON.stringify(frames)};
 const timings = [];
@@ -106,7 +105,9 @@ async function clickAt(selector, line) {
   await snap();
 }
 
-await hold(10, 100);
+await hold(4, 100);
+await ui.eval('window.__demoScript(1)');
+await hold(6, 100);
 const snapshot = await ui.snapshot({ scope: 'viewport' });
 const elements = snapshot.split('\\n').filter((line) => /^\\[\\d+\\]/.test(line)).length;
 console.log('snapshot: ' + elements + ' interactive elements, ' + snapshot.length + ' chars');
@@ -139,6 +140,9 @@ await ui.eval('window.__demoLog(' + JSON.stringify('downloaded · ' + download.f
 await snap();
 console.log('downloaded: ' + download.filename + ' (' + download.bytes + ' bytes)');
 await hold(12, 110);
+
+await ui.eval('window.__demoDone()');
+await hold(8, 110);
 
 await ui.eval('window.__demoCursor(1180, 730)');
 await hold(6, 120);
@@ -179,7 +183,7 @@ async function encode(directory, frames, timings) {
   await run("ffmpeg", [
     "-y", "-hide_banner", "-loglevel", "error",
     "-f", "concat", "-safe", "0", "-i", listFile,
-    "-vf", "fps=15,scale=1200:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=192[p];[b][p]paletteuse=dither=sierra2_4a",
+    "-vf", "fps=12,scale=1100:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=64[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
     "-loop", "0", gif,
   ]);
 

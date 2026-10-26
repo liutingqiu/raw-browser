@@ -247,9 +247,81 @@
     0% { transform: scale(.55); opacity: 1; }
     100% { transform: scale(2.35); opacity: 0; }
   }
+
+  /* agent-active stage ------------------------------------------------ */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-color: #0d0f13;
+    background-image: none;
+    opacity: 0;
+    transition: opacity .7s ease;
+    pointer-events: none;
+    z-index: 0;
+  }
+  body.agent-active::before { opacity: 1; }
+
+  .stage {
+    position: relative;
+    display: inline-block;
+    isolation: isolate;
+    z-index: 1;
+  }
+  .stage::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 16px;
+    background: linear-gradient(125deg, #5b86ff 0%, #a17bff 28%, #5b86ff 52%, #8fe0ff 74%, #5b86ff 100%);
+    filter: blur(24px);
+    opacity: 0;
+    z-index: -1;
+    pointer-events: none;
+    transition: opacity .5s ease;
+  }
+  body.agent-active .stage::before {
+    opacity: .6;
+    animation: breathe 3.8s ease-in-out infinite;
+  }
+  .stage::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border: 4px solid transparent;
+    border-image: linear-gradient(125deg, #5b86ff 0%, #a17bff 35%, #8fe0ff 65%, #5b86ff 100%) 1;
+    box-shadow:
+      0 0 0 1px rgba(160, 195, 255, .90),
+      0 0 26px rgba(90, 140, 255, .80),
+      0 0 70px rgba(125, 95, 255, .42),
+      0 0 120px rgba(90, 140, 255, .18),
+      inset 0 0 16px rgba(100, 145, 255, .22);
+    opacity: 0;
+    z-index: 2;
+    pointer-events: none;
+    transition: opacity .45s ease;
+  }
+  body.agent-active .stage::after { opacity: 1; }
+  .browser {
+    position: relative;
+    z-index: 1;
+    transition: box-shadow .7s ease;
+  }
+  body.agent-active .browser {
+    box-shadow: 10px 10px 0 rgba(0, 0, 0, .55);
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: .50; }
+    50% { opacity: .95; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body.agent-active .stage::before { animation: none; opacity: .6; }
+    body::before, .stage::before, .stage::after, .browser { transition: none; }
+  }
 </style>
 </head>
 <body>
+  <div class="stage">
   <div class="browser">
     <div class="tabs">
       <div class="tab active"><span class="tabdot"></span>Acme Ops</div>
@@ -325,6 +397,7 @@
         <div class="script-foot"><b>1</b> script <span>/</span> <b>6</b> actions <span>/</span> 0 model round-trips</div>
       </aside>
     </div>
+  </div>
   </div>
 
   <div id="cursor">
@@ -422,6 +495,7 @@
     setTimeout(() => r.remove(), 520);
   };
   window.__demoScript = (line) => {
+    document.body.classList.toggle('agent-active', Number(line) > 0);
     const lines = codeEl.querySelectorAll('.code-line');
     for (const el of lines) {
       const n = Number(el.dataset.line);
@@ -429,6 +503,7 @@
       el.classList.toggle('done', n < line);
     }
   };
+  window.__demoDone = () => document.body.classList.remove('agent-active');
   window.__demoLog = (text) => {
     const div = document.createElement('div');
     div.className = 'line new';
