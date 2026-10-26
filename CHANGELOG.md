@@ -3,6 +3,15 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- The extension bridge draws a breathing agent-active glow around a controlled
+  tab while raw is issuing commands, with a `raw controlling` badge. It fades
+  after 12 seconds without a command and is removed immediately on detach.
+- The demo dashboard uses the same active-state glow while `run.mjs` is playing.
+
 ## [0.7.0] - 2026-10-23
 
 ### Added

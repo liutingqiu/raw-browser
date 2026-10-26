@@ -194,7 +194,8 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   }
 });
 
-chrome.tabs.onUpdated.addListener((tabId, _change, tab) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "loading") bridge.noteNavigated(tabId);
   if (!bridge.shouldEmitTargetEvents()) return;
   post({ kind: "browserEvent", method: "Target.targetInfoChanged", params: { targetInfo: RawEdgeBridgeCore.targetInfo(tab) } });
 });

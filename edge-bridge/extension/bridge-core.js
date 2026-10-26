@@ -52,9 +52,84 @@
     };
   }
 
+  const AGENT_GLOW_ID = "raw-agent-glow";
+  const AGENT_GLOW_IDLE_MS = 12_000;
+  const AGENT_GLOW_CSS = `
+#raw-agent-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483647;
+  border: 4px solid transparent;
+  border-image: linear-gradient(125deg, #5b86ff 0%, #a17bff 35%, #8fe0ff 65%, #5b86ff 100%) 1;
+  box-shadow:
+    inset 0 0 0 1px rgba(160, 195, 255, .90),
+    inset 0 0 28px rgba(90, 140, 255, .65),
+    inset 0 0 90px rgba(125, 95, 255, .35);
+  animation: raw-agent-glow-breathe 3.8s ease-in-out infinite;
+  opacity: 1;
+  transition: opacity .45s ease;
+}
+#raw-agent-glow.raw-glow-out {
+  opacity: 0;
+  animation: none;
+}
+#raw-agent-glow::after {
+  content: "raw controlling";
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(13, 15, 19, .82);
+  color: #dfe8ff;
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .04em;
+  border: 1px solid rgba(140, 175, 255, .45);
+  box-shadow: 0 0 22px rgba(90, 140, 255, .45);
+  backdrop-filter: blur(8px);
+}
+@keyframes raw-agent-glow-breathe {
+  0%, 100% { opacity: .55; }
+  50% { opacity: .95; }
+}
+`;
+
+  // Injected into the page with chrome.scripting.executeScript, so it must be
+  // self-contained: no references to extension-scope helpers.
+  function agentGlowShow(id, idleMs) {
+    const remove = (node) => {
+      clearTimeout(node.__rawGlowTimer);
+      node.classList.add("raw-glow-out");
+      setTimeout(() => node.remove(), 450);
+    };
+    const existing = document.getElementById(id);
+    if (existing) {
+      existing.classList.remove("raw-glow-out");
+      clearTimeout(existing.__rawGlowTimer);
+      existing.__rawGlowTimer = setTimeout(() => remove(existing), idleMs);
+      return;
+    }
+    const node = document.createElement("div");
+    node.id = id;
+    node.className = "raw-glow";
+    node.__rawGlowTimer = setTimeout(() => remove(node), idleMs);
+    (document.documentElement ?? document.body).appendChild(node);
+  }
+
+  function agentGlowHide(id) {
+    const node = document.getElementById(id);
+    if (!node) return;
+    clearTimeout(node.__rawGlowTimer);
+    node.classList.add("raw-glow-out");
+    setTimeout(() => node.remove(), 450);
+  }
+
   function createBridgeExecutor(chromeApi) {
     const attachedTabs = new Set();
     const attachingTabs = new Map();
+    const glowCssTabs = new Set();
     let discoverTargets = false;
     let autoAttachTargets = false;
 
@@ -98,10 +173,55 @@
       }
     }
 
+    async function showGlow(tabId) {
+      if (!attachedTabs.has(tabId)) return;
+      if (!chromeApi.scripting?.insertCSS || !chromeApi.scripting?.executeScript) return;
+      try {
+        if (!glowCssTabs.has(tabId)) {
+          await chromeApi.scripting.insertCSS({
+            target: { tabId, allFrames: false },
+            css: AGENT_GLOW_CSS,
+          });
+          glowCssTabs.add(tabId);
+        }
+        await chromeApi.scripting.executeScript({
+          target: { tabId },
+          func: agentGlowShow,
+          args: [AGENT_GLOW_ID, AGENT_GLOW_IDLE_MS],
+        });
+      } catch {
+        // Restricted pages and tabs that close mid-command cannot host the overlay.
+      }
+    }
+
+    async function hideGlow(tabId) {
+      glowCssTabs.delete(tabId);
+      if (!chromeApi.scripting?.executeScript) return;
+      try {
+        await chromeApi.scripting.executeScript({
+          target: { tabId },
+          func: agentGlowHide,
+          args: [AGENT_GLOW_ID],
+        });
+      } catch {
+        // The tab may already be gone.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        await chromeApi.scripting.removeCSS?.({
+          target: { tabId, allFrames: false },
+          css: AGENT_GLOW_CSS,
+        });
+      } catch {
+        // The tab may already be gone.
+      }
+    }
+
     async function detach(value) {
       const tabId = tabIdFrom(value);
-      if (attachedTabs.has(tabId)) await chromeApi.debugger.detach({ tabId });
-      attachedTabs.delete(tabId);
+      const wasAttached = attachedTabs.delete(tabId);
+      await hideGlow(tabId);
+      if (wasAttached) await chromeApi.debugger.detach({ tabId });
     }
 
     async function listTabs() {
@@ -120,7 +240,8 @@
     async function sendTabCommand(payload) {
       const tab = await tabFor(payload);
       const tabId = await ensureAttached(tab.id);
-      
+      await showGlow(tabId);
+
       const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : 30_000;
       return await new Promise((resolve, reject) => {
         let settled = false;
@@ -136,6 +257,7 @@
             if (!settled) {
               settled = true;
               clearTimeout(timer);
+              void showGlow(tabId);
               resolve(res);
             }
           })
@@ -143,6 +265,7 @@
             if (!settled) {
               settled = true;
               clearTimeout(timer);
+              void showGlow(tabId);
               reject(err);
             }
           });
@@ -199,6 +322,7 @@
           const tab = await chromeApi.tabs.get(tabIdFrom(explicit));
           await chromeApi.tabs.remove(tab.id);
           attachedTabs.delete(tab.id);
+          glowCssTabs.delete(tab.id);
           return { success: true };
         }
         case "Target.activateTarget": {
@@ -434,6 +558,8 @@
           }
           const windows = await chromeApi.windows.getAll({ windowTypes: ["normal"] });
           for (const win of windows) await chromeApi.windows.remove(win.id);
+          attachedTabs.clear();
+          glowCssTabs.clear();
           return { ok: true, windows: windows.length };
         }
         default:
@@ -451,10 +577,13 @@
           return await listTabs();
         case "createTab":
           return serializableTab(await chromeApi.tabs.create({ url: payload.url || "about:blank", active: payload.active !== false }));
-        case "closeTab":
-          await chromeApi.tabs.remove(tabIdFrom(payload.tabId));
-          attachedTabs.delete(tabIdFrom(payload.tabId));
+        case "closeTab": {
+          const tabId = tabIdFrom(payload.tabId);
+          await chromeApi.tabs.remove(tabId);
+          attachedTabs.delete(tabId);
+          glowCssTabs.delete(tabId);
           return {};
+        }
         case "activateTab":
           await activate(payload.tabId);
           return {};
@@ -476,7 +605,12 @@
       execute,
       ensureAttached,
       noteDetached(value) {
-        attachedTabs.delete(tabIdFrom(value));
+        const tabId = tabIdFrom(value);
+        attachedTabs.delete(tabId);
+        void hideGlow(tabId);
+      },
+      noteNavigated(value) {
+        glowCssTabs.delete(tabIdFrom(value));
       },
       isAttached(value) {
         return attachedTabs.has(tabIdFrom(value));

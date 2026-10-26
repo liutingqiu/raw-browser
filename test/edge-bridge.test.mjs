@@ -29,6 +29,7 @@ function createChromeMock(initialTabs = []) {
   const calls = {
     attach: [], detach: [], sendCommand: [], remove: [], tabUpdate: [], windowUpdate: [], windowRemove: [], cancel: [],
     proxyGet: [], proxySet: [], proxyClear: [], notify: [], historySearch: [], browsingRemove: [], insertCSS: [], removeCSS: [],
+    executeScript: [],
     cookiesGetAll: [], cookiesGet: [], cookiesSet: [], cookiesRemove: [], downloadStart: [], setEnabled: [], frames: [],
   };
   let proxyValue = { mode: "system" };
@@ -211,6 +212,14 @@ function createChromeMock(initialTabs = []) {
       async removeCSS(injection) {
         calls.removeCSS.push(plain(injection));
       },
+      async executeScript(injection) {
+        calls.executeScript.push({
+          target: plain(injection.target ?? {}),
+          args: plain(injection.args ?? []),
+          func: injection.func?.name ?? "",
+        });
+        return [{ result: null }];
+      },
     },
   };
   return { chrome, calls, tabs: () => tabs.map((tab) => ({ ...tab })) };
@@ -253,6 +262,30 @@ test("page CDP forwards every tested domain, including cookie and upload methods
   }
   assert.deepEqual(mock.calls.sendCommand.map((call) => call[1]), methods.map((item) => item[0]));
   assert.equal(mock.calls.attach.length, 1, "one tab debugger attachment is reused across domains");
+});
+
+test("page commands show the agent glow and detach removes it", async () => {
+  const { createBridgeExecutor } = loadCore();
+  const mock = createChromeMock(fixtures);
+  const bridge = createBridgeExecutor(mock.chrome);
+
+  await bridge.execute({ op: "cdp", payload: { tabId: 11, method: "Page.enable" } });
+  assert.equal(mock.calls.insertCSS.length, 1);
+  assert.deepEqual(mock.calls.insertCSS[0].target, { tabId: 11, allFrames: false });
+  const show = mock.calls.executeScript.find((call) => call.func === "agentGlowShow");
+  assert.ok(show);
+  assert.deepEqual(show.target, { tabId: 11 });
+  assert.deepEqual(show.args, ["raw-agent-glow", 12000]);
+
+  await bridge.execute({
+    op: "browserCdp",
+    payload: { method: "Target.detachFromTarget", params: { sessionId: "raw-edge-tab-11" } },
+  });
+  const hide = mock.calls.executeScript.find((call) => call.func === "agentGlowHide");
+  assert.ok(hide);
+  assert.deepEqual(hide.args, ["raw-agent-glow"]);
+  assert.equal(mock.calls.removeCSS.length, 1);
+  assert.deepEqual(mock.calls.removeCSS[0].target, { tabId: 11, allFrames: false });
 });
 
 test("unknown browser-level methods are forwarded instead of denied", async () => {
