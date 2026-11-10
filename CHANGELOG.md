@@ -3,14 +3,26 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
-## [Unreleased]
+## [0.8.0] - 2026-11-10
 
 ### Added
 
-- The extension bridge draws a breathing agent-active glow around a controlled
-  tab while raw is issuing commands, with a `raw controlling` badge. It fades
-  after 12 seconds without a command and is removed immediately on detach.
-- The demo dashboard uses the same active-state glow while `run.mjs` is playing.
+- **raw.mesh (Blackboard & Mailbox)**: Zero-dependency cross-agent collaboration engine
+  built natively on Node 22 `node:sqlite` (WAL mode). Persistent tasks, defensive XML
+  envelope packaging to prevent tag escaping, and SHA-256 content-addressed artifact storage.
+- **raw.term (Terminal Visual Topology)**: Native Tmux pane discovery and topology routing.
+  Enforces a strict `Read-Before-Act` guard so agents must observe a pane's state before
+  dispatching wake signals, preventing accidental disruption of active typing.
+- **raw.verify (Acceptance Contract Engine)**: Objective contract verification that rejects
+  agent self-reporting hallucinations. Executes real check commands in isolated child processes
+  and validates `exitCode === 0` with protected test file baseline enforcement.
+- **Compact MCP Facade Tools**: Added folded MCP tools `raw_task` and `raw_term` to prevent
+  context window inflation while exposing full multi-agent orchestration capabilities on demand.
+
+### Changed
+
+- Extension bridge draws agent pointer animations and synchronizes driving runtime identity
+  via MAIN-world DOM reflection.
 
 ## [0.7.0] - 2026-10-23
 

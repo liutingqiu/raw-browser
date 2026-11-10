@@ -19,6 +19,24 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TIMEOUT = Number(process.env.RAW_MCP_TIMEOUT_MS || 60_000);
 
+let _blackboard = null;
+async function getBlackboard() {
+  if (!_blackboard) {
+    const { Blackboard } = await import("../dist/mesh/blackboard.js");
+    _blackboard = new Blackboard();
+  }
+  return _blackboard;
+}
+
+let _tmuxDriver = null;
+async function getTmuxDriver() {
+  if (!_tmuxDriver) {
+    const { TmuxDriver } = await import("../dist/term/tmux-driver.js");
+    _tmuxDriver = new TmuxDriver();
+  }
+  return _tmuxDriver;
+}
+
 function findCli() {
   if (process.env.RAW_CLI) return process.env.RAW_CLI;
   const candidates = [
@@ -216,6 +234,46 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "raw_task",
+    description: "Multi-Agent task blackboard & mailbox. Actions: create, poll, get, update, submit_artifact, verify.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["create", "poll", "get", "update", "submit_artifact", "verify"],
+          description: "Blackboard operation to perform",
+        },
+        params: {
+          type: "object",
+          description: "Action-specific parameters",
+        },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_term",
+    description: "Tmux terminal topology & non-disruptive wake signals. Actions: list, peek, wake, name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "peek", "wake", "name"],
+          description: "Tmux terminal operation",
+        },
+        params: {
+          type: "object",
+          description: "Action-specific parameters",
+        },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 function bridgeArgs() {
@@ -401,6 +459,80 @@ async function callTool(name, args = {}, requestId) {
       const argv = ["call", String(args.method), JSON.stringify(args.params ?? {})];
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
       return { text: asText(result.value ?? result.text), isError: !result.ok };
+    }
+    case "raw_task": {
+      const p = args.params || {};
+      const bb = await getBlackboard();
+      switch (args.action) {
+        case "create": {
+          const task = bb.createTask({
+            title: String(p.title || "Untitled"),
+            creator: String(p.creator || "agent"),
+            assignee: String(p.assignee || "all"),
+            contextData: p.contextData,
+            contractSpec: p.contractSpec,
+          });
+          return { text: JSON.stringify(task, null, 2), isError: false };
+        }
+        case "poll": {
+          const msgs = bb.pollInbox(String(p.recipient || "all"), { unreadOnly: p.unreadOnly !== false });
+          return { text: JSON.stringify(msgs, null, 2), isError: false };
+        }
+        case "get": {
+          const task = bb.getTask(String(p.taskId));
+          return { text: JSON.stringify(task, null, 2), isError: !task };
+        }
+        case "update": {
+          const ok = bb.updateTaskStatus(String(p.taskId), p.status, p.resultData);
+          return { text: JSON.stringify({ ok }), isError: !ok };
+        }
+        case "submit_artifact": {
+          const art = bb.submitArtifact({
+            taskId: String(p.taskId),
+            author: String(p.author || "agent"),
+            artifactType: p.artifactType || "unified_diff",
+            content: String(p.content || ""),
+          });
+          return { text: JSON.stringify(art, null, 2), isError: false };
+        }
+        case "verify": {
+          const { runContract } = await import("../dist/verify/runner.js");
+          const task = bb.getTask(String(p.taskId));
+          if (!task || !task.contract_spec) {
+            return { text: "Task not found or contract_spec is missing", isError: true };
+          }
+          const contract = typeof task.contract_spec === "string" ? JSON.parse(task.contract_spec) : task.contract_spec;
+          const verdict = await runContract(contract, p.cwd || process.cwd());
+          bb.updateTaskStatus(task.task_id, verdict.verdict === "verified" ? "completed" : "failed", verdict);
+          return { text: JSON.stringify(verdict, null, 2), isError: verdict.verdict !== "verified" };
+        }
+        default:
+          return { text: `unknown raw_task action: ${args.action}`, isError: true };
+      }
+    }
+    case "raw_term": {
+      const p = args.params || {};
+      const term = await getTmuxDriver();
+      switch (args.action) {
+        case "list": {
+          const panes = await term.listPanes(p.session);
+          return { text: JSON.stringify(panes, null, 2), isError: false };
+        }
+        case "peek": {
+          const output = await term.peekPane(String(p.target), p.lines);
+          return { text: output, isError: false };
+        }
+        case "wake": {
+          const ok = await term.wakePane(String(p.target), String(p.taskId));
+          return { text: JSON.stringify({ ok }), isError: !ok };
+        }
+        case "name": {
+          const ok = await term.namePane(String(p.target), String(p.name));
+          return { text: JSON.stringify({ ok }), isError: !ok };
+        }
+        default:
+          return { text: `unknown raw_term action: ${args.action}`, isError: true };
+      }
     }
     default:
       return { text: `unknown tool: ${name}`, isError: true };
