@@ -236,13 +236,13 @@ const tools = [
   },
   {
     name: "raw_task",
-    description: "Multi-Agent task blackboard & mailbox. Actions: create, poll, get, update, submit_artifact, verify.",
+    description: "Multi-Agent task blackboard & mailbox. Actions: create, send, poll, list, get, update, submit_artifact, verify.",
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["create", "poll", "get", "update", "submit_artifact", "verify"],
+          enum: ["create", "send", "poll", "list", "get", "update", "submit_artifact", "verify"],
           description: "Blackboard operation to perform",
         },
         params: {
@@ -465,18 +465,82 @@ async function callTool(name, args = {}, requestId) {
       const bb = await getBlackboard();
       switch (args.action) {
         case "create": {
+          const creator = String(p.creator || "agent");
+          const assignee = String(p.assignee || "all");
           const task = bb.createTask({
             title: String(p.title || "Untitled"),
-            creator: String(p.creator || "agent"),
-            assignee: String(p.assignee || "all"),
+            creator,
+            assignee,
             contextData: p.contextData,
             contractSpec: p.contractSpec,
           });
-          return { text: JSON.stringify(task, null, 2), isError: false };
+          // Dispatch notification: a task without an inbox envelope is invisible to poll().
+          const { Mailbox } = await import("../dist/mesh/mailbox.js");
+          const notice = bb.postMessage({
+            taskId: task.task_id,
+            sender: creator,
+            recipient: assignee,
+            msgType: "task_request",
+            payload: {
+              title: task.title,
+              contextData: p.contextData ?? null,
+              contractSpec: p.contractSpec ?? null,
+            },
+          });
+          return {
+            text: JSON.stringify({ ...task, envelope: Mailbox.wrapEnvelope(notice, task.title) }, null, 2),
+            isError: false,
+          };
+        }
+        case "send": {
+          // Ad-hoc agent-to-agent message. Creates a lightweight task when no taskId is given.
+          const { Mailbox } = await import("../dist/mesh/mailbox.js");
+          const sender = String(p.sender || "agent");
+          const recipient = String(p.recipient || "all");
+          const msgType = String(p.msgType || "handoff");
+          const payload = p.payload ?? p.text ?? "";
+          let task = p.taskId ? bb.getTask(String(p.taskId)) : null;
+          if (!task) {
+            const title =
+              String(p.title || (typeof payload === "string" ? payload.slice(0, 60) : "agent message"));
+            task = bb.createTask({
+              title,
+              creator: sender,
+              assignee: recipient,
+              contextData: p.contextData,
+            });
+          }
+          const msg = bb.postMessage({
+            taskId: task.task_id,
+            sender,
+            recipient,
+            msgType,
+            payload,
+          });
+          return {
+            text: JSON.stringify({ ok: true, message: msg, envelope: Mailbox.wrapEnvelope(msg, task.title) }, null, 2),
+            isError: false,
+          };
         }
         case "poll": {
-          const msgs = bb.pollInbox(String(p.recipient || "all"), { unreadOnly: p.unreadOnly !== false });
-          return { text: JSON.stringify(msgs, null, 2), isError: false };
+          const recipient = String(p.recipient || "all");
+          const { Mailbox } = await import("../dist/mesh/mailbox.js");
+          const msgs = bb.pollInbox(recipient, { unreadOnly: p.unreadOnly !== false });
+          const envelopes = msgs.map((m) => {
+            const task = m.task_id ? bb.getTask(m.task_id) : null;
+            return Mailbox.wrapEnvelope(m, task ? task.title : undefined);
+          });
+          if (p.markRead === true) {
+            for (const m of msgs) bb.markMessageRead(m.msg_id);
+          }
+          return { text: JSON.stringify({ count: msgs.length, messages: msgs, envelopes }, null, 2), isError: false };
+        }
+        case "list": {
+          const tasks = bb.listTasks({
+            assignee: p.assignee ? String(p.assignee) : undefined,
+            status: p.status ? String(p.status) : undefined,
+          });
+          return { text: JSON.stringify(tasks.slice(0, Number(p.limit || 20)), null, 2), isError: false };
         }
         case "get": {
           const task = bb.getTask(String(p.taskId));
