@@ -10,7 +10,18 @@ export class Mailbox {
       .replace(/&/g, "&amp;")
       .replace(/"/g, "&quot;")
       .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+      .replace(/>/g, "&gt;")
+      .replace(/'/g, "&apos;");
+  }
+
+  /** Inverse of escapeXmlAttr, so a wrapped envelope parses back to its input. */
+  static unescapeXmlAttr(s: string): string {
+    return s
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, "&");
   }
 
   /**
@@ -42,7 +53,7 @@ export class Mailbox {
     const attrRegex = /([a-z0-9_-]+)="([^"]*)"/gi;
     let m: RegExpExecArray | null;
     while ((m = attrRegex.exec(attrsStr)) !== null) {
-      attrs[m[1]] = m[2];
+      attrs[m[1]] = Mailbox.unescapeXmlAttr(m[2]);
     }
     return attrs;
   }

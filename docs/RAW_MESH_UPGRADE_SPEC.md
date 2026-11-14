@@ -1,3 +1,10 @@
+> **Status (2026-11): implemented in 0.8.0, with two deliberate deviations.**
+> The six planned tools were folded into `raw_task` and `raw_term` with an
+> `action` parameter so one server does not spend context on a dozen schemas;
+> and the target release is `0.8.0`, not `2.0.0-mesh`. `protectedFiles` is now
+> enforced against the committed `HEAD` version. The sections below are kept as
+> the original design record.
+
 # raw 架构升维白皮书：从浏览器直驱到全能 Agent 协同底座 (raw v2.0 Architecture)
 
 **代号：** `raw-mesh-upgrade`  

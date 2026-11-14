@@ -2,9 +2,52 @@
  * Verification Runner for raw.verify.
  * Executes independent acceptance checks and checks process exit codes.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { AcceptanceContract, CheckSpec } from "../mesh/types.js";
 import { normalizeContract, type VerificationVerdict, type VerificationCheckResult } from "./contract.js";
+
+const MAX_OUTPUT = 50_000;
+const MAX_PROTECTED_BYTES = 64 * 1024 * 1024;
+
+function sha256(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+/**
+ * Kill the whole process tree, not just the shell. A check like `npm test`
+ * spawns children that keep the stdout pipe open; killing only /bin/sh used to
+ * leave them running and the promise waiting for a `close` that never came.
+ */
+function killProcessTree(child: ReturnType<typeof spawn>): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    } catch {
+      /* already gone */
+    }
+    try {
+      child.kill();
+    } catch {
+      /* already gone */
+    }
+    return;
+  }
+  try {
+    // The child was spawned detached, so its pgid equals its pid.
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+}
 
 function executeCheck(check: CheckSpec, cwd: string): Promise<VerificationCheckResult> {
   const start = Date.now();
@@ -14,9 +57,8 @@ function executeCheck(check: CheckSpec, cwd: string): Promise<VerificationCheckR
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
-    let killed = false;
+    let settled = false;
 
-    // Use /bin/sh or cmd.exe to run shell commands safely
     const isWin = process.platform === "win32";
     const shell = isWin ? "cmd.exe" : "/bin/sh";
     const shellArg = isWin ? "/c" : "-c";
@@ -25,40 +67,53 @@ function executeCheck(check: CheckSpec, cwd: string): Promise<VerificationCheckR
       cwd,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // A separate process group is what lets the POSIX timeout kill the
+      // grandchildren as well as the shell.
+      detached: !isWin,
+      windowsHide: true,
     });
+
+    const finish = (result: VerificationCheckResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+      resolve(result);
+    };
 
     const timer = setTimeout(() => {
-      killed = true;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // Ignore
-      }
-    }, timeoutMs);
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-      if (stdout.length > 50_000) {
-        stdout = stdout.slice(-50_000); // Bounded output cap
-      }
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-      if (stderr.length > 50_000) {
-        stderr = stderr.slice(-50_000);
-      }
-    });
-
-    child.on("error", (err: Error) => {
-      clearTimeout(timer);
-      const durationMs = Date.now() - start;
-      resolve({
+      killProcessTree(child);
+      finish({
         name: check.name,
         command: check.command,
         exitCode: null,
         passed: false,
-        durationMs,
+        durationMs: Date.now() - start,
+        stdout,
+        stderr,
+        error: `Command timed out after ${timeoutMs}ms`,
+      });
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > MAX_OUTPUT) stdout = stdout.slice(-MAX_OUTPUT);
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+      if (stderr.length > MAX_OUTPUT) stderr = stderr.slice(-MAX_OUTPUT);
+    });
+
+    child.on("error", (err: Error) => {
+      finish({
+        name: check.name,
+        command: check.command,
+        exitCode: null,
+        passed: false,
+        durationMs: Date.now() - start,
         stdout,
         stderr,
         error: err.message,
@@ -66,22 +121,104 @@ function executeCheck(check: CheckSpec, cwd: string): Promise<VerificationCheckR
     });
 
     child.on("close", (code: number | null) => {
-      clearTimeout(timer);
-      const durationMs = Date.now() - start;
-      const passed = !killed && code === expectedExitCode;
-
-      resolve({
+      finish({
         name: check.name,
         command: check.command,
         exitCode: code,
-        passed,
-        durationMs,
+        passed: code === expectedExitCode,
+        durationMs: Date.now() - start,
         stdout,
         stderr,
-        error: killed ? `Command timed out after ${timeoutMs}ms` : undefined,
       });
     });
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Protected files: tests an agent must not rewrite to "pass"
+ * ------------------------------------------------------------------ */
+
+interface ProtectedBaseline {
+  file: string;
+  /** Content hash the verification compares against. */
+  hash: string | null;
+  /** True when the hash came from the committed HEAD version. */
+  fromGit: boolean;
+}
+
+interface ProtectedSnapshot {
+  baseline: ProtectedBaseline[];
+  violation?: string;
+}
+
+function git(cwd: string, args: string[]): { status: number; stdout: Buffer } {
+  try {
+    const result = spawnSync("git", args, {
+      cwd,
+      maxBuffer: MAX_PROTECTED_BYTES,
+      windowsHide: true,
+    });
+    return { status: result.status ?? 1, stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout ?? "") };
+  } catch {
+    return { status: 1, stdout: Buffer.alloc(0) };
+  }
+}
+
+function repoRoot(cwd: string): string | null {
+  if (git(cwd, ["rev-parse", "--is-inside-work-tree"]).status !== 0) return null;
+  const top = git(cwd, ["rev-parse", "--show-toplevel"]);
+  const root = top.stdout.toString("utf8").trim();
+  return top.status === 0 && root ? root : null;
+}
+
+/** Hash of each protected file as it is at the start of verification. */
+export function snapshotProtectedFiles(cwd: string, files: string[] = []): ProtectedSnapshot {
+  if (files.length === 0) return { baseline: [] };
+  const root = repoRoot(cwd);
+  const baseline: ProtectedBaseline[] = [];
+  let violation: string | undefined;
+
+  for (const file of files) {
+    const abs = path.resolve(cwd, file);
+    if (!fs.existsSync(abs)) {
+      violation ??= `protected file is missing: ${file}`;
+      baseline.push({ file, hash: null, fromGit: false });
+      continue;
+    }
+
+    if (root) {
+      const relative = path.relative(root, abs).split(path.sep).join("/");
+      const show = git(root, ["show", `HEAD:${relative}`]);
+      if (show.status === 0) {
+        baseline.push({ file, hash: sha256(show.stdout), fromGit: true });
+        continue;
+      }
+      // Tracked nowhere in HEAD: there is no trusted version to compare against.
+      violation ??= `protected file is not tracked at HEAD: ${file}`;
+    }
+    baseline.push({ file, hash: sha256(fs.readFileSync(abs)), fromGit: false });
+  }
+
+  return { baseline, violation };
+}
+
+/** Compare the files again after the checks ran. */
+export function verifyProtectedFiles(cwd: string, snapshot: ProtectedSnapshot): string | undefined {
+  let violation = snapshot.violation;
+  for (const entry of snapshot.baseline) {
+    if (entry.hash === null) continue;
+    const abs = path.resolve(cwd, entry.file);
+    if (!fs.existsSync(abs)) {
+      violation ??= `protected file was deleted during verification: ${entry.file}`;
+      continue;
+    }
+    if (sha256(fs.readFileSync(abs)) !== entry.hash) {
+      violation ??= entry.fromGit
+        ? `protected file was modified against HEAD: ${entry.file}`
+        : `protected file changed during verification: ${entry.file}`;
+    }
+  }
+  return violation;
 }
 
 export async function runContract(
@@ -89,6 +226,11 @@ export async function runContract(
   cwd: string = process.cwd()
 ): Promise<VerificationVerdict> {
   const contract = normalizeContract(rawContract);
+  if (!fs.existsSync(cwd)) {
+    throw new Error(`verification cwd does not exist: ${cwd}`);
+  }
+
+  const snapshot = snapshotProtectedFiles(cwd, contract.protectedFiles ?? []);
   const results: VerificationCheckResult[] = [];
   let allPassed = true;
 
@@ -101,11 +243,14 @@ export async function runContract(
   }
 
   const passedChecks = results.filter((r) => r.passed).length;
+  const protectedViolation = verifyProtectedFiles(cwd, snapshot);
+  const verdict = allPassed && protectedViolation === undefined ? "verified" : "refuted";
 
   return {
-    verdict: allPassed ? "verified" : "refuted",
+    verdict,
     passedChecks,
     totalChecks: results.length,
     results,
+    ...(protectedViolation ? { protectedViolation } : {}),
   };
 }

@@ -57,6 +57,68 @@ let browser = detectedBrowser === "chrome" ? "chrome" : "edge";
 let currentTabId = null;
 const inFlight = new Map();
 
+/** Tools that only touch SQLite/tmux never wait behind a slow browser call. */
+const LOCAL_TOOLS = new Set(["raw_task", "raw_term"]);
+const LOCAL_TOOL_TIMEOUT_MS = Number(process.env.RAW_LOCAL_TOOL_TIMEOUT_MS || 120_000);
+const MAX_IMAGE_BYTES = Number(process.env.RAW_MCP_MAX_IMAGE_BYTES || 8_000_000);
+
+/** camelCase is canonical; snake_case is accepted so a caller's usual style works. */
+const PARAM_ALIASES = {
+  taskId: ["taskId", "task_id"],
+  artifactType: ["artifactType", "artifact_type"],
+  msgType: ["msgType", "msg_type"],
+  contextData: ["contextData", "context_data"],
+  contractSpec: ["contractSpec", "contract_spec"],
+  resultData: ["resultData", "result_data"],
+  unreadOnly: ["unreadOnly", "unread_only"],
+  markRead: ["markRead", "mark_read"],
+};
+
+const ALIAS_TO_CANONICAL = new Map();
+for (const [canonical, aliases] of Object.entries(PARAM_ALIASES)) {
+  for (const alias of aliases) ALIAS_TO_CANONICAL.set(alias, canonical);
+}
+
+const TASK_PARAMS = {
+  create: ["title", "creator", "assignee", "contextData", "contractSpec"],
+  send: ["taskId", "title", "sender", "recipient", "msgType", "payload", "text", "contextData"],
+  poll: ["recipient", "unreadOnly", "markRead"],
+  list: ["assignee", "status", "limit"],
+  get: ["taskId"],
+  update: ["taskId", "status", "resultData"],
+  submit_artifact: ["taskId", "author", "artifactType", "content"],
+  verify: ["taskId", "cwd"],
+};
+
+/**
+ * Normalize one action's parameters and refuse unknown keys. Silently dropping
+ * `contract_spec` used to create a task with no contract and no error.
+ */
+function normalizeTaskParams(action, raw) {
+  const allowed = TASK_PARAMS[action];
+  if (!allowed) throw new Error(`unknown raw_task action: ${action}`);
+  const allowedSet = new Set(allowed);
+  const out = {};
+  const unknown = [];
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    const canonical = ALIAS_TO_CANONICAL.get(key) ?? key;
+    if (!allowedSet.has(canonical)) {
+      unknown.push(key);
+      continue;
+    }
+    if (canonical in out && out[canonical] !== value) {
+      throw new Error(`conflicting values passed for ${canonical}`);
+    }
+    out[canonical] = value;
+  }
+  if (unknown.length) {
+    throw new Error(
+      `unknown parameter(s) for ${action}: ${unknown.join(", ")}; accepted: ${allowed.join(", ")}`,
+    );
+  }
+  return out;
+}
+
 const tools = [
   {
     name: "raw_use",
@@ -236,7 +298,7 @@ const tools = [
   },
   {
     name: "raw_task",
-    description: "Multi-Agent task blackboard & mailbox. Actions: create, send, poll, list, get, update, submit_artifact, verify.",
+    description: "Multi-Agent task blackboard & mailbox. Actions: create, send, poll, list, get, update, submit_artifact, verify. Parameters use camelCase; snake_case aliases (task_id, contract_spec, artifact_type, msg_type) are accepted too.",
     inputSchema: {
       type: "object",
       properties: {
@@ -431,6 +493,15 @@ async function callTool(name, args = {}, requestId) {
       if (!result.ok) return { text: asText(result.value ?? result.text), isError: true };
       const saved = result.value?.saved;
       if (saved && fs.existsSync(saved)) {
+        const bytes = fs.statSync(saved).size;
+        if (bytes > MAX_IMAGE_BYTES) {
+          return {
+            text:
+              `screenshot saved to ${saved} (${bytes} bytes) but it is larger than the ` +
+              `${MAX_IMAGE_BYTES}-byte inline limit, so it was not attached; open it from disk.`,
+            isError: false,
+          };
+        }
         const data = fs.readFileSync(saved).toString("base64");
         return {
           text: `screenshot: ${saved}`,
@@ -461,9 +532,13 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_task": {
-      const p = args.params || {};
+      const action = String(args.action || "");
+      const p = normalizeTaskParams(action, args.params || {});
       const bb = await getBlackboard();
-      switch (args.action) {
+      const { Mailbox } = await import("../dist/mesh/mailbox.js");
+      const taskId = p.taskId === undefined || p.taskId === null ? "" : String(p.taskId);
+
+      switch (action) {
         case "create": {
           const creator = String(p.creator || "agent");
           const assignee = String(p.assignee || "all");
@@ -475,7 +550,6 @@ async function callTool(name, args = {}, requestId) {
             contractSpec: p.contractSpec,
           });
           // Dispatch notification: a task without an inbox envelope is invisible to poll().
-          const { Mailbox } = await import("../dist/mesh/mailbox.js");
           const notice = bb.postMessage({
             taskId: task.task_id,
             sender: creator,
@@ -493,16 +567,25 @@ async function callTool(name, args = {}, requestId) {
           };
         }
         case "send": {
-          // Ad-hoc agent-to-agent message. Creates a lightweight task when no taskId is given.
-          const { Mailbox } = await import("../dist/mesh/mailbox.js");
+          // Ad-hoc agent-to-agent message. Creates a lightweight task only when
+          // no taskId was given; a typo must not silently create a ghost task.
           const sender = String(p.sender || "agent");
           const recipient = String(p.recipient || "all");
           const msgType = String(p.msgType || "handoff");
           const payload = p.payload ?? p.text ?? "";
-          let task = p.taskId ? bb.getTask(String(p.taskId)) : null;
-          if (!task) {
+          let task;
+          if (taskId) {
+            task = bb.getTask(taskId);
+            if (!task) {
+              return {
+                text: `task not found: ${taskId} (omit taskId to start a new thread, or create the task first)`,
+                isError: true,
+              };
+            }
+          } else {
             const title =
-              String(p.title || (typeof payload === "string" ? payload.slice(0, 60) : "agent message"));
+              String(p.title || (typeof payload === "string" ? payload.slice(0, 60) : "agent message")).trim() ||
+              "agent message";
             task = bb.createTask({
               title,
               creator: sender,
@@ -524,7 +607,6 @@ async function callTool(name, args = {}, requestId) {
         }
         case "poll": {
           const recipient = String(p.recipient || "all");
-          const { Mailbox } = await import("../dist/mesh/mailbox.js");
           const msgs = bb.pollInbox(recipient, { unreadOnly: p.unreadOnly !== false });
           const envelopes = msgs.map((m) => {
             const task = m.task_id ? bb.getTask(m.task_id) : null;
@@ -536,63 +618,103 @@ async function callTool(name, args = {}, requestId) {
           return { text: JSON.stringify({ count: msgs.length, messages: msgs, envelopes }, null, 2), isError: false };
         }
         case "list": {
+          const limit = Number(p.limit ?? 20);
+          const take = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 500) : 20;
           const tasks = bb.listTasks({
             assignee: p.assignee ? String(p.assignee) : undefined,
             status: p.status ? String(p.status) : undefined,
           });
-          return { text: JSON.stringify(tasks.slice(0, Number(p.limit || 20)), null, 2), isError: false };
+          return { text: JSON.stringify(tasks.slice(0, take), null, 2), isError: false };
         }
         case "get": {
-          const task = bb.getTask(String(p.taskId));
+          if (!taskId) return { text: "raw_task get needs taskId", isError: true };
+          const task = bb.getTask(taskId);
           return { text: JSON.stringify(task, null, 2), isError: !task };
         }
         case "update": {
-          const ok = bb.updateTaskStatus(String(p.taskId), p.status, p.resultData);
+          if (!taskId) return { text: "raw_task update needs taskId", isError: true };
+          if (p.status === undefined) return { text: "raw_task update needs status", isError: true };
+          const ok = bb.updateTaskStatus(taskId, String(p.status), p.resultData);
           return { text: JSON.stringify({ ok }), isError: !ok };
         }
         case "submit_artifact": {
+          if (!taskId) return { text: "raw_task submit_artifact needs taskId", isError: true };
           const art = bb.submitArtifact({
-            taskId: String(p.taskId),
+            taskId,
             author: String(p.author || "agent"),
-            artifactType: p.artifactType || "unified_diff",
-            content: String(p.content || ""),
+            artifactType: String(p.artifactType || "unified_diff"),
+            content: String(p.content ?? ""),
           });
           return { text: JSON.stringify(art, null, 2), isError: false };
         }
         case "verify": {
+          if (!taskId) return { text: "raw_task verify needs taskId", isError: true };
           const { runContract } = await import("../dist/verify/runner.js");
-          const task = bb.getTask(String(p.taskId));
-          if (!task || !task.contract_spec) {
-            return { text: "Task not found or contract_spec is missing", isError: true };
-          }
+          const task = bb.getTask(taskId);
+          if (!task) return { text: `task not found: ${taskId}`, isError: true };
+          if (!task.contract_spec) return { text: `task ${taskId} has no contract_spec`, isError: true };
           const contract = typeof task.contract_spec === "string" ? JSON.parse(task.contract_spec) : task.contract_spec;
-          const verdict = await runContract(contract, p.cwd || process.cwd());
+          const verdict = await runContract(contract, p.cwd ? String(p.cwd) : process.cwd());
           bb.updateTaskStatus(task.task_id, verdict.verdict === "verified" ? "completed" : "failed", verdict);
           return { text: JSON.stringify(verdict, null, 2), isError: verdict.verdict !== "verified" };
         }
         default:
-          return { text: `unknown raw_task action: ${args.action}`, isError: true };
+          return { text: `unknown raw_task action: ${action}`, isError: true };
       }
     }
     case "raw_term": {
       const p = args.params || {};
+      const target = p.target ?? p.targetPane ?? p.target_pane ?? p.pane;
+      const taskIdParam = p.taskId ?? p.task_id;
+      const session = p.session ?? p.targetSession ?? p.target_session;
       const term = await getTmuxDriver();
       switch (args.action) {
         case "list": {
-          const panes = await term.listPanes(p.session);
-          return { text: JSON.stringify(panes, null, 2), isError: false };
+          if (!(await term.isAvailable())) {
+            return {
+              text: JSON.stringify(
+                { panes: [], note: "tmux has no running server; start one with `tmux new -s work`" },
+                null,
+                2,
+              ),
+              isError: false,
+            };
+          }
+          try {
+            const panes = await term.listPanes(session ? String(session) : undefined);
+            return { text: JSON.stringify(panes, null, 2), isError: false };
+          } catch (error) {
+            return { text: `could not list tmux panes: ${error?.message ?? error}`, isError: true };
+          }
         }
         case "peek": {
-          const output = await term.peekPane(String(p.target), p.lines);
-          return { text: output, isError: false };
+          if (!target) return { text: "raw_term peek needs target", isError: true };
+          try {
+            const output = await term.peekPane(String(target), p.lines);
+            return { text: output, isError: false };
+          } catch (error) {
+            return { text: `could not peek pane ${target}: ${error?.message ?? error}`, isError: true };
+          }
         }
         case "wake": {
-          const ok = await term.wakePane(String(p.target), String(p.taskId));
-          return { text: JSON.stringify({ ok }), isError: !ok };
+          if (!target) return { text: "raw_term wake needs target", isError: true };
+          if (!taskIdParam) return { text: "raw_term wake needs taskId", isError: true };
+          try {
+            const ok = await term.wakePane(String(target), String(taskIdParam));
+            return { text: JSON.stringify({ ok }), isError: !ok };
+          } catch (error) {
+            return { text: error?.message ?? String(error), isError: true };
+          }
         }
         case "name": {
-          const ok = await term.namePane(String(p.target), String(p.name));
-          return { text: JSON.stringify({ ok }), isError: !ok };
+          if (!target) return { text: "raw_term name needs target", isError: true };
+          if (!p.name) return { text: "raw_term name needs name", isError: true };
+          try {
+            const ok = await term.namePane(String(target), String(p.name));
+            return { text: JSON.stringify({ ok }), isError: !ok };
+          } catch (error) {
+            return { text: error?.message ?? String(error), isError: true };
+          }
         }
         default:
           return { text: `unknown raw_term action: ${args.action}`, isError: true };
@@ -623,7 +745,7 @@ async function handle(message) {
     reply(id, {
       protocolVersion: params?.protocolVersion || "2024-11-05",
       capabilities: { tools: {} },
-      serverInfo: { name: "raw-browser", version: "0.7.0" },
+      serverInfo: { name: "raw-browser", version: "0.8.0" },
     });
     return;
   }
@@ -649,18 +771,38 @@ async function handle(message) {
   if (method === "tools/call") {
     const name = params?.name;
     const args = params?.arguments || {};
-    // Serialize tool calls: one browser, one queue. This also keeps the
-    // remembered current tab deterministic.
-    queue = queue.then(async () => {
+    let replied = false;
+    const respond = (payload) => {
+      if (replied) return;
+      replied = true;
+      reply(id, payload);
+    };
+    const run = async () => {
       try {
         const result = await callTool(name, args, id);
         const content = [{ type: "text", text: result.text ?? "" }];
         if (result.image) content.push(result.image);
-        reply(id, { content, isError: result.isError === true });
+        respond({ content, isError: result.isError === true });
       } catch (error) {
-        reply(id, { content: [{ type: "text", text: String(error?.message || error) }], isError: true });
+        respond({ content: [{ type: "text", text: String(error?.message || error) }], isError: true });
       }
-    });
+    };
+
+    if (LOCAL_TOOLS.has(name)) {
+      // Local tools talk to SQLite/tmux only, so they must not wait
+      // behind a slow browser command (and a wedged one must not block them).
+      const timer = setTimeout(
+        () => respond({ content: [{ type: "text", text: `${name} timed out after ${LOCAL_TOOL_TIMEOUT_MS}ms` }], isError: true }),
+        LOCAL_TOOL_TIMEOUT_MS,
+      );
+      timer.unref?.();
+      run().finally(() => clearTimeout(timer));
+      return;
+    }
+
+    // Serialize browser tools: one browser, one queue. This also keeps the
+    // remembered current tab deterministic.
+    queue = queue.then(run);
     await queue;
     return;
   }

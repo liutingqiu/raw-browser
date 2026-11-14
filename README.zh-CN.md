@@ -212,10 +212,11 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 ## MCP server
 
 `npm install -g raw-browser` 会同时安装 `raw-mcp`，这是一个 stdio MCP server，
-把运行时暴露为 16 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
+把运行时暴露为 18 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
 `raw_new`、`raw_goto`、`raw_text`、`raw_html`、`raw_eval`、`raw_snapshot`、
 `raw_click`、`raw_fill`、`raw_visit`、`raw_screenshot`、`raw_cookies`、
-`raw_frames`，以及逃生舱 `raw_call`。
+`raw_frames`、逃生舱 `raw_call`，以及两个多 Agent 工具 `raw_task` 和
+`raw_term`。
 
 ```json
 {
@@ -250,6 +251,21 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 [HOL Guard](https://github.com/hashgraph-online/hol-guard) 的 MCP 目录中
 （`mcp.raw-browser`）：只读工具沿用默认策略，导航、输入和 Cookie 读取需要复核，
 `raw_eval` / `raw_call` 被阻止。
+
+### 多 Agent 工具
+
+`raw_task` 在 `$RAW_HOME/mesh/blackboard.db`（默认 `~/.raw/mesh/blackboard.db`）
+维护一块 SQLite 黑板：建任务时可附带验收契约，支持信箱消息、
+按内容寻址的工件提交，以及跑真实命令看 exitCode 的 `verify`。
+参数以 camelCase 为准，同时接受 `task_id`、`contract_spec` 这类 snake_case
+别名；未知参数会直接报错，不再静默丢弃。`verify` 还会检查 `protectedFiles`：
+文件缺失、未提交到 `HEAD`、或相对 `HEAD` 被改动，都会判为不通过，
+避免任务靠改自己的测试蒙混过关。
+
+`raw_term` 列出 tmux pane、读取指定 pane（同时记录读前守卫），
+并投递 `raw pickup <taskId>` 唤醒信号；60 秒内没 peek 过的 pane 会被拒绝。
+
+完整参数表见 [docs/API.md](docs/API.md#mcp-multi-agent-tools)。
 
 ## 安全模型
 

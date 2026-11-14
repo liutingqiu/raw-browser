@@ -8,6 +8,20 @@ import { markRead, requireRead, clearRead } from "./read-guard.js";
 
 const execFileAsync = promisify(execFile);
 
+/** tmux should never be able to hang an agent forever. */
+const TMUX_TIMEOUT_MS = 15_000;
+const TMUX_MAX_BUFFER = 4 * 1024 * 1024;
+
+const PANE_FORMAT = "#{pane_id}|#{pane_index}|#{pane_title}|#{pane_current_command}|#{pane_active}";
+
+/**
+ * `-a` lists every pane on the server and overrides `-t`, so a session-scoped
+ * listing must use `-s` instead or every session leaks into the result.
+ */
+export function listPanesArgs(targetSession?: string): string[] {
+  return targetSession ? ["-s", "-t", targetSession, "-F", PANE_FORMAT] : ["-a", "-F", PANE_FORMAT];
+}
+
 export interface TmuxPaneInfo {
   paneId: string;
   paneIndex: number;
@@ -32,16 +46,21 @@ export class TmuxDriver {
     return base;
   }
 
-  private async runTmux(subcommand: string, args: string[]): Promise<string> {
+  private async runTmux(subcommand: string, args: string[], timeoutMs = TMUX_TIMEOUT_MS): Promise<string> {
     const fullArgs = this.buildArgs(subcommand, args);
-    const { stdout } = await execFileAsync("tmux", fullArgs, { encoding: "utf8" });
+    const { stdout } = await execFileAsync("tmux", fullArgs, {
+      encoding: "utf8",
+      timeout: timeoutMs,
+      maxBuffer: TMUX_MAX_BUFFER,
+      windowsHide: true,
+    });
     return stdout;
   }
 
   /** Check whether a tmux server is reachable */
   async isAvailable(): Promise<boolean> {
     try {
-      await this.runTmux("list-sessions", []);
+      await this.runTmux("list-sessions", [], 5000);
       return true;
     } catch {
       return false;
@@ -50,13 +69,7 @@ export class TmuxDriver {
 
   /** Enumerate all panes in the active or target session */
   async listPanes(targetSession?: string): Promise<TmuxPaneInfo[]> {
-    const format = "#{pane_id}|#{pane_index}|#{pane_title}|#{pane_current_command}|#{pane_active}";
-    const args = ["-a", "-F", format];
-    if (targetSession) {
-      args.unshift("-t", targetSession);
-    }
-
-    const output = await this.runTmux("list-panes", args);
+    const output = await this.runTmux("list-panes", listPanesArgs(targetSession));
     const lines = output.trim().split("\n").filter(Boolean);
 
     return lines.map((line) => {
