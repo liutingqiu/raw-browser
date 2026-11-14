@@ -29,7 +29,7 @@ function createChromeMock(initialTabs = []) {
   const calls = {
     attach: [], detach: [], sendCommand: [], remove: [], tabUpdate: [], windowUpdate: [], windowRemove: [], cancel: [],
     proxyGet: [], proxySet: [], proxyClear: [], notify: [], historySearch: [], browsingRemove: [], insertCSS: [], removeCSS: [],
-    executeScript: [],
+    executeScript: [], group: [], ungroup: [], groupUpdate: [],
     cookiesGetAll: [], cookiesGet: [], cookiesSet: [], cookiesRemove: [], downloadStart: [], setEnabled: [], frames: [],
   };
   let proxyValue = { mode: "system" };
@@ -71,10 +71,22 @@ function createChromeMock(initialTabs = []) {
         calls.remove.push(Number(tabId));
         tabs = tabs.filter((item) => item.id !== Number(tabId));
       },
+      async group({ tabIds }) {
+        calls.group.push(tabIds.map(Number));
+        return 5;
+      },
+      async ungroup(tabIds) {
+        calls.ungroup.push(tabIds.map(Number));
+      },
       async update(tabId, options) {
         calls.tabUpdate.push([Number(tabId), plain(options)]);
         if (options.active) tabs = tabs.map((item) => ({ ...item, active: item.id === Number(tabId) }));
         return chrome.tabs.get(tabId);
+      },
+    },
+    tabGroups: {
+      async update(groupId, props) {
+        calls.groupUpdate.push([groupId, plain(props)]);
       },
     },
     windows: {
@@ -318,6 +330,27 @@ test("Target lifecycle maps create, attach, activate, close, and detach to exten
   assert.equal(mock.calls.detach.length, 1);
   assert.deepEqual(plain(await bridge.execute({ op: "browserCdp", payload: { method: "Target.closeTarget", params: { targetId } } })), { success: true });
   assert.ok(!mock.tabs().some((tab) => String(tab.id) === targetId));
+});
+
+test("Raw.groupTabs groups owned tabs with a title and supports ungroup", async () => {
+  const { createBridgeExecutor } = loadCore();
+  const mock = createChromeMock(fixtures);
+  const bridge = createBridgeExecutor(mock.chrome);
+  const ids = [fixtures[0].id, fixtures[1].id];
+  const grouped = await bridge.execute({
+    op: "browserCdp",
+    payload: { method: "Raw.groupTabs", params: { tabIds: ids, title: "dsh", color: "blue" } },
+  });
+  assert.equal(grouped.groupId, 5);
+  assert.deepEqual(mock.calls.group[0], ids.map(Number));
+  assert.deepEqual(mock.calls.groupUpdate[0], [5, { title: "dsh", color: "blue" }]);
+
+  const ungrouped = await bridge.execute({
+    op: "browserCdp",
+    payload: { method: "Raw.ungroupTabs", params: { tabIds: [ids[0]] } },
+  });
+  assert.equal(ungrouped.ok, true);
+  assert.deepEqual(mock.calls.ungroup[0], [Number(ids[0])]);
 });
 
 test("concurrent commands share one in-flight debugger attachment", async () => {

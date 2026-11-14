@@ -566,6 +566,32 @@ async function main() {
       }
     }
 
+    let selectedMode = null;
+    if (plan.browser !== "both") {
+      const profileConfig = path.join(plan.rawHome, "browser-profiles", "current.json");
+      try {
+        let current = {};
+        try {
+          current = JSON.parse(fs.readFileSync(profileConfig, "utf8").replace(/^\ufeff/, ""));
+        } catch {
+          /* a missing or malformed file is replaced below */
+        }
+        if (!current.mode) {
+          fs.mkdirSync(path.dirname(profileConfig), { recursive: true });
+          writeJson(profileConfig, { ...current, mode: `${plan.browser}-extension` }, 0o644);
+          selectedMode = `${plan.browser}-extension`;
+        } else {
+          selectedMode = current.mode;
+        }
+      } catch (error) {
+        console.error(`warning: could not select the bridge in ${profileConfig}: ${error.message}`);
+      }
+    } else {
+      console.error(
+        "note: --browser both leaves browser-profiles/current.json alone; set its mode to edge-extension or chrome-extension once you pick one.",
+      );
+    }
+
     process.stdout.write(`${JSON.stringify({
       ExtensionId: id,
       ExtensionPath: plan.extensionPath,
@@ -577,6 +603,7 @@ async function main() {
       ChromeManifest: plan.chromeManifest,
       EdgePort: edgeConfig.port,
       ChromePort: chromeConfig.port,
+      Mode: selectedMode,
       Registered: registered,
     }, null, 2)}\n`);
   } finally {

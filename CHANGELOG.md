@@ -32,6 +32,16 @@ follow Semantic Versioning.
 
 ### Changed
 
+- Foreign tabs are read-only for other agents; `raw_clone` copies a tab's URL and
+  scroll position into the agent's own tab instead of taking it over.
+- New MCP tools: `raw_press`, `raw_select`, `raw_scroll`, `raw_wait`,
+  `raw_group` (Chrome tab groups per agent) and `raw_run` (a snippet bound to the
+  agent's tab).
+- Large payloads are compacted: `raw_task list` returns summaries, `poll` takes a
+  limit, and failing check output is truncated.
+- The installer selects `browser-profiles/current.json` when one browser is
+  installed, and the PowerShell installer falls back to the latest release.
+- `raw-bridge --help` and argument errors no longer require a bridge config.
 - Extension bridge draws agent pointer animations and synchronizes driving runtime identity
   via MAIN-world DOM reflection.
 - Bridge navigation normalizes a bare host name (`raw_goto example.com`) instead of
@@ -299,6 +309,7 @@ follow Semantic Versioning.
 - Browser smoke testing uses a disposable profile and covers forms, iframes, downloads, screenshots, isolated spaces, cleanup, and CPU timeouts.
 
 [Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.7.0...HEAD
+[0.8.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.8.0
 [0.7.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.7.0
 [0.6.2]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.2
 [0.6.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.1

@@ -49,6 +49,21 @@ switch (command) {
     print({ closed: id });
     break;
   }
+  case "press":
+    print({ pressed: args[1] ?? "", tabId: String(args[0]) });
+    break;
+  case "scroll":
+    print({ tabId: String(args[0]), scrollY: Number(args[1]) || 0 });
+    break;
+  case "select":
+    print({ tabId: String(args[0]), value: args[2] ?? "", label: args[2] ?? "" });
+    break;
+  case "title":
+    print("stub title");
+    break;
+  case "url":
+    print("https://stub.example/");
+    break;
   case "text":
     print(`stub text for tab ${String(args[0])}`);
     break;
@@ -70,9 +85,15 @@ switch (command) {
   case "screenshot":
     print({ saved: args[1] ?? "stub.png", bytes: 1 });
     break;
-  case "eval":
-    print({ tabId: String(args[0]), expression: args[1] ?? "" });
+  case "eval": {
+    const expression = args[1] ?? "";
+    if (expression.includes("location.href")) {
+      print({ url: "https://copied.example/", scrollX: 0, scrollY: 0 });
+      break;
+    }
+    print({ tabId: String(args[0]), expression });
     break;
+  }
   default:
     print({ error: `stub: unknown command ${command}` }, 1);
 }

@@ -134,32 +134,43 @@ test("TabOwnership: goto with no claimed tab opens its own instead of using the 
   }
 });
 
-test("TabOwnership: agents may read and act on each other's tabs when explicit", async () => {
+test("TabOwnership: another agent's tab is read-only until it is cloned", async () => {
   const world = makeWorld();
   const a = await boot(world);
   const b = await boot(world);
   try {
     const claimed = await a.tool("raw_claim", { label: "alpha", url: "https://a.example/" });
     const tabId = claimed.data.tabId;
-
-    // b opens its own tab and works there unless it names alpha's tab.
     await b.tool("raw_claim", { label: "beta", url: "https://b.example/" });
-    const implicit = await b.tool("raw_eval", { expression: "1" });
-    assert.equal(JSON.parse(implicit.text).tabId, "2");
 
+    // Reading is allowed and names the owner.
     const read = await b.tool("raw_text", { tabId });
     assert.equal(read.isError, false);
     assert.match(read.text, /belongs to "alpha"/);
 
-    const write = await b.tool("raw_click", { selector: "#x", tabId });
-    assert.equal(write.isError, false);
-    assert.match(write.text, /belongs to "alpha"/);
+    // Writing (including eval) is refused with the clone hint.
+    for (const tool of ["raw_click", "raw_fill", "raw_eval"]) {
+      const args = tool === "raw_click" ? { selector: "#x", tabId }
+        : tool === "raw_fill" ? { selector: "#x", value: "v", tabId }
+        : { expression: "1", tabId };
+      const denied = await b.tool(tool, args);
+      assert.equal(denied.isError, true, `${tool} should be refused`);
+      assert.match(denied.text, /read-only/);
+      assert.match(denied.text, /raw_clone/);
+    }
+
+    // Cloning gives beta its own copy to operate on.
+    const clone = await b.tool("raw_clone", { tabId });
+    assert.equal(clone.isError, false);
+    assert.equal(clone.data.sourceTabId, tabId);
+    assert.notEqual(clone.data.tabId, tabId);
+    const writeCopy = await b.tool("raw_click", { selector: "#x" });
+    assert.equal(writeCopy.isError, false);
 
     // Closing another agent's tab is destructive and needs an explicit force.
     const denied = await b.tool("raw_close", { tabId });
     assert.equal(denied.isError, true);
     assert.match(denied.text, /pass "force": true/);
-
     const forced = await b.tool("raw_close", { tabId, force: true });
     assert.equal(forced.isError, false);
   } finally {
@@ -239,6 +250,98 @@ test("Verify evidence: a verdict carries the page screenshot and URL", async () 
     assert.equal(verified.data.verdict, "verified");
     assert.equal(verified.data.evidence.tabId, "1");
     assert.ok(verified.data.evidence.screenshot.endsWith(`${task.task_id}.png`));
+  } finally {
+    a.close();
+  }
+});
+
+
+test("MCP compaction: list is summary-only and poll honours a limit", async () => {
+  const world = makeWorld();
+  const a = await boot(world);
+  try {
+    const created = await a.tool("raw_task", {
+      action: "create",
+      params: {
+        title: "summary",
+        creator: "a",
+        assignee: "b",
+        contextData: { big: "x".repeat(5000) },
+        contractSpec: { checks: [{ command: "node ok.mjs" }] },
+      },
+    });
+    assert.equal(created.isError, false);
+
+    const listed = await a.tool("raw_task", { action: "list", params: {} });
+    const entry = listed.data[0];
+    assert.equal(entry.has_contract, true);
+    assert.equal(entry.has_context, true);
+    assert.equal("contract_spec" in entry, false);
+    assert.equal("context_data" in entry, false);
+    assert.equal("result_data" in entry, false);
+
+    for (const text of ["one", "two", "three"]) {
+      await a.tool("raw_task", { action: "send", params: { sender: "a", recipient: "bulk", text } });
+    }
+    const polled = await a.tool("raw_task", { action: "poll", params: { recipient: "bulk", limit: 1 } });
+    assert.equal(polled.data.count, 1);
+    assert.equal(polled.data.total, 3);
+    assert.equal(polled.data.truncated, true);
+  } finally {
+    a.close();
+  }
+});
+
+test("MCP compaction: a noisy check is truncated in the verdict", async () => {
+  const world = makeWorld();
+  const a = await boot(world);
+  try {
+    fs.writeFileSync(path.join(world.home, "noisy.mjs"), 'process.stdout.write("x".repeat(10000));');
+    const created = await a.tool("raw_task", {
+      action: "create",
+      params: {
+        title: "noisy",
+        creator: "a",
+        assignee: "b",
+        contractSpec: { checks: [{ command: "node noisy.mjs" }] },
+      },
+    });
+    const verified = await a.tool("raw_task", {
+      action: "verify",
+      params: { taskId: created.data.task_id, cwd: world.home },
+    });
+    assert.equal(verified.isError, false, verified.text);
+    assert.equal(verified.data.results[0].stdout.length, 4000);
+    assert.equal(verified.data.results[0].outputTruncated, true);
+    assert.ok(verified.text.length < 20000, `verdict text was ${verified.text.length} chars`);
+  } finally {
+    a.close();
+  }
+});
+
+test("MCP raw_run: a snippet drives only this agent's tab", async () => {
+  const world = makeWorld();
+  const a = await boot(world);
+  try {
+    await a.tool("raw_claim", { label: "alpha", url: "https://a.example/" });
+    const ran = await a.tool("raw_run", {
+      code: "const t = await page.text('body'); console.log(t); return page.tabId;",
+    });
+    assert.equal(ran.isError, false, ran.text);
+    assert.match(ran.text, /stub text for tab 1/);
+    assert.match(ran.text, /returned: 1/);
+  } finally {
+    a.close();
+  }
+});
+
+test("MCP raw_task: an unknown task says so", async () => {
+  const world = makeWorld();
+  const a = await boot(world);
+  try {
+    const got = await a.tool("raw_task", { action: "get", params: { taskId: "task-nope" } });
+    assert.equal(got.isError, true);
+    assert.match(got.text, /task not found/);
   } finally {
     a.close();
   }

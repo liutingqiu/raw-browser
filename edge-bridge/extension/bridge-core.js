@@ -632,6 +632,22 @@
           if (!details.url || !details.name) throw new Error("Raw.cookiesRemove needs { url, name }");
           return await chromeApi.cookies.remove(details);
         }
+        case "Raw.groupTabs": {
+          const tabIds = (Array.isArray(params.tabIds) ? params.tabIds : []).map((id) => tabIdFrom(id));
+          if (tabIds.length === 0) throw new Error("Raw.groupTabs needs tabIds");
+          const groupId = await chromeApi.tabs.group({ tabIds });
+          const update = {};
+          if (params.title !== undefined) update.title = String(params.title);
+          if (params.color !== undefined) update.color = String(params.color);
+          if (Object.keys(update).length > 0) await chromeApi.tabGroups.update(groupId, update);
+          return { groupId };
+        }
+        case "Raw.ungroupTabs": {
+          const tabIds = (Array.isArray(params.tabIds) ? params.tabIds : []).map((id) => tabIdFrom(id));
+          if (tabIds.length === 0) throw new Error("Raw.ungroupTabs needs tabIds");
+          await chromeApi.tabs.ungroup(tabIds);
+          return { ok: true, tabIds };
+        }
         case "Raw.updateTab": {
           const tab = await tabFor(params);
           const update = params.update ?? {};

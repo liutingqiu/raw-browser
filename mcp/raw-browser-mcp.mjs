@@ -103,7 +103,7 @@ for (const [canonical, aliases] of Object.entries(PARAM_ALIASES)) {
 const TASK_PARAMS = {
   create: ["title", "creator", "assignee", "contextData", "contractSpec"],
   send: ["taskId", "title", "sender", "recipient", "msgType", "payload", "text", "contextData"],
-  poll: ["recipient", "unreadOnly", "markRead"],
+  poll: ["recipient", "unreadOnly", "markRead", "limit"],
   list: ["assignee", "status", "limit"],
   get: ["taskId"],
   update: ["taskId", "status", "resultData"],
@@ -304,6 +304,101 @@ const tools = [
         tabId: { type: "string" },
       },
       required: ["selector", "value"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_press",
+    description: "Press a key or chord in the tab (Enter, Tab, Escape, Control+a).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Key name or chord, e.g. Enter or Control+a" },
+        tabId: { type: "string" },
+      },
+      required: ["key"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_scroll",
+    description: "Scroll the page and return the new scrollY.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dy: { type: "number", description: "Pixels to scroll (default 800)" },
+        tabId: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_select",
+    description: "Choose an option in a <select> by value or label.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        selector: { type: "string" },
+        value: { type: "string", description: "Option value or visible label" },
+        tabId: { type: "string" },
+      },
+      required: ["selector", "value"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_wait",
+    description: "Wait until a selector reaches attached/visible/hidden/detached.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        selector: { type: "string" },
+        state: { type: "string", enum: ["attached", "visible", "hidden", "detached"] },
+        timeoutMs: { type: "number", description: "Default 15000, max 120000" },
+        tabId: { type: "string" },
+      },
+      required: ["selector"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_clone",
+    description:
+      "Copy a tab (URL and scroll position) into a new tab this agent owns. Use it to act on someone else's page without touching theirs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: { type: "string", description: "Tab to copy (default: your current tab)" },
+        url: { type: "string", description: "Copy this URL instead of reading the tab" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_group",
+    description: "Put this agent's tabs into one Chrome tab group titled with its label.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        label: { type: "string", description: "Group title (default: this agent's label)" },
+        color: { type: "string", description: "blue, green, red, yellow, purple, cyan, orange, pink or grey" },
+        group: { type: "boolean", description: "false = ungroup" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_run",
+    description:
+      "Run a JavaScript snippet with a page bound to this agent's tab: page.goto/click/fill/press/scroll/select/text/html/eval/snapshot/screenshot/waitFor, plus sleep and console. Several steps in one call.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "Async function body; use page, sleep, console" },
+        timeoutMs: { type: "number", description: "Default 120000, max 600000" },
+        tabId: { type: "string" },
+      },
+      required: ["code"],
       additionalProperties: false,
     },
   },
@@ -511,6 +606,106 @@ function assertClosable(tabId, force) {
   return id;
 }
 
+/** Foreign tabs are read-only; to act on one, clone it first. */
+function assertWritable(tabId) {
+  const id = String(tabId);
+  const owner = ownerOf(id, { file: registryFile() });
+  if (owner && owner !== ownerLabel) {
+    throw new Error(
+      `tab ${id} belongs to "${owner}" and is read-only for other agents; ` +
+        `call raw_clone { "tabId": "${id}" } to work on your own copy`,
+    );
+  }
+  return id;
+}
+
+const GROUP_COLORS = ["blue", "green", "red", "yellow", "purple", "cyan", "orange", "pink", "grey"];
+function groupColor(label) {
+  let hash = 0;
+  for (const ch of String(label)) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  return GROUP_COLORS[hash % GROUP_COLORS.length];
+}
+
+/** Keep a large failing check from flooding the model's context. */
+function compactVerdict(verdict) {
+  const LIMIT = 4000;
+  const results = (verdict.results ?? []).map((entry) => {
+    const stdout = String(entry.stdout ?? "");
+    const stderr = String(entry.stderr ?? "");
+    return {
+      ...entry,
+      stdout: stdout.slice(0, LIMIT),
+      stderr: stderr.slice(0, LIMIT),
+      ...(stdout.length > LIMIT || stderr.length > LIMIT ? { outputTruncated: true } : {}),
+    };
+  });
+  return { ...verdict, results };
+}
+
+async function waitForSelector(tabId, selector, { state = "visible", timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + Math.max(100, Math.min(Number(timeoutMs) || 15_000, 120_000));
+  const expression =
+    `(() => { const sel = ${JSON.stringify(String(selector))}; const state = ${JSON.stringify(String(state))};` +
+    ` const el = (window.__mai && window.__mai.find) ? window.__mai.find(sel) : document.querySelector(sel);` +
+    ` const visible = (node) => { if (!node) return false; const r = node.getBoundingClientRect();` +
+    ` if (r.width < 1 || r.height < 1) return false; const s = getComputedStyle(node);` +
+    ` return s.visibility !== "hidden" && s.display !== "none" && Number(s.opacity) !== 0; };` +
+    ` if (state === "attached") return !!el; if (state === "detached") return !el;` +
+    ` if (state === "hidden") return !el || !visible(el); return !!el && visible(el); })()`;
+  for (;;) {
+    const result = await runRaw(["eval", String(tabId), expression], 15_000);
+    if (result.ok && result.value === true) return `selector ${selector} is ${state}`;
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${selector} to be ${state}`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+/** Code-as-action: one snippet, many bridge steps, still bound to our own tab. */
+async function runPageScript(code, tabId, timeoutMs = 120_000) {
+  const deadline = Date.now() + Math.max(100, Math.min(Number(timeoutMs) || 120_000, 600_000));
+  const guard = () => {
+    if (Date.now() > deadline) throw new Error(`raw_run exceeded ${timeoutMs}ms`);
+  };
+  const bridge = async (argv, ms = DEFAULT_TIMEOUT) => {
+    guard();
+    const result = await runRaw(argv, ms);
+    if (!result.ok) throw new Error(asText(result.value ?? result.text));
+    return result.value;
+  };
+  const page = {
+    tabId,
+    url: () => bridge(["url", tabId]),
+    title: () => bridge(["title", tabId]),
+    text: (selector) => bridge(selector ? ["text", tabId, String(selector)] : ["text", tabId]),
+    html: (selector) => bridge(selector ? ["html", tabId, String(selector)] : ["html", tabId]),
+    eval: (expression) => bridge(["eval", tabId, String(expression)]),
+    snapshot: () => bridge(["snapshot", tabId]),
+    goto: (url) => {
+      checkOrigin(url);
+      return bridge(["goto", tabId, String(url)], 90_000);
+    },
+    click: (selector) => bridge(["click", tabId, String(selector)]),
+    fill: (selector, value) => bridge(["fill", tabId, String(selector), String(value)]),
+    press: (key) => bridge(["press", tabId, String(key)]),
+    scroll: (dy = 800) => bridge(["scroll", tabId, String(dy)]),
+    select: (selector, value) => bridge(["select", tabId, String(selector), String(value)]),
+    screenshot: (out) => bridge(out ? ["screenshot", tabId, String(out)] : ["screenshot", tabId]),
+    waitFor: (selector, opts) => waitForSelector(tabId, selector, opts),
+  };
+  const logs = [];
+  const format = (value) => (typeof value === "string" ? value : JSON.stringify(value));
+  const consoleProxy = {
+    log: (...args) => logs.push(args.map(format).join(" ")),
+    info: (...args) => logs.push(args.map(format).join(" ")),
+    warn: (...args) => logs.push(args.map(format).join(" ")),
+    error: (...args) => logs.push(args.map(format).join(" ")),
+  };
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const fn = new AsyncFunction("page", "sleep", "console", code);
+  const value = await fn(page, (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0))), consoleProxy);
+  return { logs, value };
+}
+
 const PERMISSIONS_FILE = process.env.RAW_PERMISSIONS_FILE || defaultPermissionsPath();
 const sessionOrigins = new Set();
 
@@ -613,7 +808,11 @@ async function callTool(name, args = {}, requestId) {
       }
       let tabId;
       if (args.tabId !== undefined && args.tabId !== null && args.tabId !== "") {
-        tabId = targetTab(args.tabId);
+        try {
+          tabId = assertWritable(targetTab(args.tabId));
+        } catch (error) {
+          return { text: error.message, isError: true };
+        }
       } else {
         const owned = ownedTabs();
         tabId = owned.includes(currentTabId) ? currentTabId : owned[0];
@@ -736,7 +935,12 @@ async function callTool(name, args = {}, requestId) {
       return { text: withNote(asText(result.value ?? result.text, 50_000), tabId), isError: !result.ok };
     }
     case "raw_eval": {
-      const tabId = targetTab(args.tabId);
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
       const argv = ["eval"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.expression ?? ""));
@@ -753,7 +957,12 @@ async function callTool(name, args = {}, requestId) {
       return { text: withNote(asText(text, 30_000), tabId), isError: !result.ok };
     }
     case "raw_click": {
-      const tabId = targetTab(args.tabId);
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
       const argv = ["click"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.selector));
@@ -761,12 +970,158 @@ async function callTool(name, args = {}, requestId) {
       return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
     }
     case "raw_fill": {
-      const tabId = targetTab(args.tabId);
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
       const argv = ["fill"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.selector), String(args.value ?? ""));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
       return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
+    }
+    case "raw_press": {
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      if (!args.key) return { text: "raw_press needs key", isError: true };
+      const result = await runRaw(["press", tabId, String(args.key)], DEFAULT_TIMEOUT, requestId);
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
+    }
+    case "raw_scroll": {
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      const dy = Number(args.dy ?? 800);
+      const result = await runRaw(["scroll", tabId, String(Number.isFinite(dy) ? dy : 800)], DEFAULT_TIMEOUT, requestId);
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
+    }
+    case "raw_select": {
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      if (args.selector === undefined) return { text: "raw_select needs selector", isError: true };
+      const result = await runRaw(
+        ["select", tabId, String(args.selector), String(args.value ?? "")],
+        DEFAULT_TIMEOUT,
+        requestId,
+      );
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
+    }
+    case "raw_wait": {
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      if (!args.selector) return { text: "raw_wait needs selector", isError: true };
+      const state = ["attached", "visible", "hidden", "detached"].includes(args.state) ? args.state : "visible";
+      try {
+        const text = await waitForSelector(tabId, String(args.selector), {
+          state,
+          timeoutMs: Number(args.timeoutMs ?? 15_000),
+        });
+        return { text: withNote(text, tabId), isError: false };
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+    }
+    case "raw_clone": {
+      let sourceId;
+      try {
+        sourceId = targetTab(args.tabId);
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      let url = args.url ? String(args.url) : "";
+      let scroll = null;
+      if (!url) {
+        const info = await runRaw(
+          ["eval", sourceId, "({ url: location.href, scrollX: window.scrollX, scrollY: window.scrollY })"],
+          15_000,
+          requestId,
+        );
+        if (!info.ok || !info.value?.url) {
+          return { text: `could not read tab ${sourceId}: ${asText(info.value ?? info.text)}`, isError: true };
+        }
+        url = String(info.value.url);
+        scroll = info.value;
+      }
+      try {
+        checkOrigin(url);
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      const opened = await openClaimedTab(url, requestId);
+      if (opened.error) return { text: opened.error, isError: true };
+      if (scroll && (Number(scroll.scrollX) || Number(scroll.scrollY))) {
+        await runRaw(
+          ["eval", opened.tabId, `(window.scrollTo(${Number(scroll.scrollX) || 0}, ${Number(scroll.scrollY) || 0}), window.scrollY)`],
+          15_000,
+          requestId,
+        );
+      }
+      return {
+        text: JSON.stringify(
+          { sourceTabId: sourceId, tabId: opened.tabId, label: opened.label, url, ownedTabs: ownedTabs() },
+          null,
+          2,
+        ),
+        isError: false,
+      };
+    }
+    case "raw_group": {
+      const owned = ownedTabs();
+      if (owned.length === 0) return { text: "you have no claimed tabs to group", isError: true };
+      const ungroup = args.group === false;
+      const payload = ungroup
+        ? { tabIds: owned.map((id) => Number(id)) }
+        : {
+            tabIds: owned.map((id) => Number(id)),
+            title: String(args.label || ownerLabel || DEFAULT_OWNER),
+            color: String(args.color || groupColor(ownerLabel || DEFAULT_OWNER)),
+          };
+      const result = await runRaw(
+        ["call", ungroup ? "Raw.ungroupTabs" : "Raw.groupTabs", JSON.stringify(payload)],
+        DEFAULT_TIMEOUT,
+        requestId,
+      );
+      if (!result.ok) return { text: asText(result.value ?? result.text), isError: true };
+      return {
+        text: JSON.stringify({ grouped: !ungroup, tabs: owned, ...(result.value ?? {}) }, null, 2),
+        isError: false,
+      };
+    }
+    case "raw_run": {
+      let tabId;
+      try {
+        tabId = assertWritable(targetTab(args.tabId));
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      if (!args.code) return { text: "raw_run needs code", isError: true };
+      try {
+        const { logs, value } = await runPageScript(String(args.code), tabId, args.timeoutMs);
+        const parts = [];
+        if (logs.length) parts.push(logs.join("\n"));
+        if (value !== undefined) parts.push(`returned: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+        if (parts.length === 0) parts.push("(script produced no output — use console.log or return a value)");
+        return { text: withNote(asText(parts.join("\n"), 24_000), tabId), isError: false };
+      } catch (error) {
+        return { text: `raw_run failed: ${error.message}`, isError: true };
+      }
     }
     case "raw_visit": {
       try {
@@ -782,7 +1137,9 @@ async function callTool(name, args = {}, requestId) {
       const tabId = targetTab(args.tabId);
       const argv = ["screenshot"];
       if (tabId) argv.push(String(tabId));
-      if (args.out) argv.push(String(args.out));
+      const out =
+        args.out || path.join(path.dirname(registryFile()), "downloads", `raw-shot-${Date.now()}.png`);
+      argv.push(String(out));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
       if (!result.ok) return { text: asText(result.value ?? result.text), isError: true };
       const saved = result.value?.saved;
@@ -901,7 +1258,10 @@ async function callTool(name, args = {}, requestId) {
         }
         case "poll": {
           const recipient = String(p.recipient || "all");
-          const msgs = bb.pollInbox(recipient, { unreadOnly: p.unreadOnly !== false });
+          const all = bb.pollInbox(recipient, { unreadOnly: p.unreadOnly !== false });
+          const limit = Number(p.limit ?? 50);
+          const take = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : 50;
+          const msgs = all.slice(0, take);
           const envelopes = msgs.map((m) => {
             const task = m.task_id ? bb.getTask(m.task_id) : null;
             return Mailbox.wrapEnvelope(m, task ? task.title : undefined);
@@ -909,7 +1269,14 @@ async function callTool(name, args = {}, requestId) {
           if (p.markRead === true) {
             for (const m of msgs) bb.markMessageRead(m.msg_id);
           }
-          return { text: JSON.stringify({ count: msgs.length, messages: msgs, envelopes }, null, 2), isError: false };
+          return {
+            text: JSON.stringify(
+              { count: msgs.length, total: all.length, truncated: all.length > msgs.length, messages: msgs, envelopes },
+              null,
+              2,
+            ),
+            isError: false,
+          };
         }
         case "list": {
           const limit = Number(p.limit ?? 20);
@@ -918,12 +1285,25 @@ async function callTool(name, args = {}, requestId) {
             assignee: p.assignee ? String(p.assignee) : undefined,
             status: p.status ? String(p.status) : undefined,
           });
-          return { text: JSON.stringify(tasks.slice(0, take), null, 2), isError: false };
+          const summaries = tasks.slice(0, take).map((task) => ({
+            task_id: task.task_id,
+            title: task.title,
+            creator: task.creator,
+            assignee: task.assignee,
+            status: task.status,
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+            has_context: task.context_data !== null,
+            has_contract: task.contract_spec !== null,
+            has_result: task.result_data !== null,
+          }));
+          return { text: JSON.stringify(summaries, null, 2), isError: false };
         }
         case "get": {
           if (!taskId) return { text: "raw_task get needs taskId", isError: true };
           const task = bb.getTask(taskId);
-          return { text: JSON.stringify(task, null, 2), isError: !task };
+          if (!task) return { text: `task not found: ${taskId}`, isError: true };
+          return { text: JSON.stringify(task, null, 2), isError: false };
         }
         case "update": {
           if (!taskId) return { text: "raw_task update needs taskId", isError: true };
@@ -979,6 +1359,7 @@ async function callTool(name, args = {}, requestId) {
           } catch {
             /* evidence is best effort; it must never turn a verdict into an error */
           }
+          verdict = compactVerdict(verdict);
           bb.updateTaskStatus(task.task_id, verdict.verdict === "verified" ? "completed" : "failed", verdict);
           return { text: JSON.stringify(verdict, null, 2), isError: verdict.verdict !== "verified" };
         }
