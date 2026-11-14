@@ -3,6 +3,16 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- The extension bridge replaces the border glow with a dense dot field lit by
+  slow waves: the source is a circle whose radius is half a period and whose
+  centre sits below the viewport, so wavefronts climb out of the bottom edge.
+  Dots have a fixed size, exist only while a crest lights them, and the
+  `raw controlling` badge (owner label) plus the agent pointer are unchanged.
+
 ## [0.8.0] - 2026-11-10
 
 ### Added
