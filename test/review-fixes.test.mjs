@@ -42,7 +42,10 @@ test("Runner: a timed-out check with a long-lived child still resolves", async (
 test("Runner: a timed-out check does not leave a writing grandchild behind", async () => {
   const dir = tmp("raw-orphan-");
   const marker = path.join(dir, "survived.txt");
-  const command = `node -e "setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(marker)},'x'),1200)"`;
+  // A real file keeps the quoting identical on cmd.exe and /bin/sh.
+  const scriptFile = path.join(dir, "orphan.mjs");
+  fs.writeFileSync(scriptFile, 'import fs from "node:fs"; setTimeout(() => fs.writeFileSync(process.argv[2], "x"), 1200);');
+  const command = `node ${JSON.stringify(scriptFile)} ${JSON.stringify(marker)}`;
 
   const verdict = await runContract({ checks: [{ name: "orphan", command, timeoutMs: 300 }] });
   assert.equal(verdict.verdict, "refuted");

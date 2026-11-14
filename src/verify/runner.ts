@@ -17,6 +17,15 @@ function sha256(buffer: Buffer): string {
 }
 
 /**
+ * Git stores LF; a Windows checkout may hand us CRLF. Normalising the line
+ * endings keeps a clean protected file from looking modified, while any real
+ * edit still changes the hash.
+ */
+function normalizedSha256(buffer: Buffer): string {
+  return sha256(Buffer.from(buffer.toString("utf8").replace(/\r\n/g, "\n"), "utf8"));
+}
+
+/**
  * Kill the whole process tree, not just the shell. A check like `npm test`
  * spawns children that keep the stdout pipe open; killing only /bin/sh used to
  * leave them running and the promise waiting for a `close` that never came.
@@ -190,13 +199,13 @@ export function snapshotProtectedFiles(cwd: string, files: string[] = []): Prote
       const relative = path.relative(root, abs).split(path.sep).join("/");
       const show = git(root, ["show", `HEAD:${relative}`]);
       if (show.status === 0) {
-        baseline.push({ file, hash: sha256(show.stdout), fromGit: true });
+        baseline.push({ file, hash: normalizedSha256(show.stdout), fromGit: true });
         continue;
       }
       // Tracked nowhere in HEAD: there is no trusted version to compare against.
       violation ??= `protected file is not tracked at HEAD: ${file}`;
     }
-    baseline.push({ file, hash: sha256(fs.readFileSync(abs)), fromGit: false });
+    baseline.push({ file, hash: normalizedSha256(fs.readFileSync(abs)), fromGit: false });
   }
 
   return { baseline, violation };
@@ -212,7 +221,7 @@ export function verifyProtectedFiles(cwd: string, snapshot: ProtectedSnapshot): 
       violation ??= `protected file was deleted during verification: ${entry.file}`;
       continue;
     }
-    if (sha256(fs.readFileSync(abs)) !== entry.hash) {
+    if (normalizedSha256(fs.readFileSync(abs)) !== entry.hash) {
       violation ??= entry.fromGit
         ? `protected file was modified against HEAD: ${entry.file}`
         : `protected file changed during verification: ${entry.file}`;
