@@ -3,17 +3,11 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
-## [Unreleased]
+## [0.9.0] - 2026-11-14
 
-### Changed
-
-- The extension bridge replaces the border glow with a dense dot field lit by
-  slow waves: the source is a circle whose radius is half a period and whose
-  centre sits below the viewport, so wavefronts climb out of the bottom edge.
-  Dots have a fixed size, exist only while a crest lights them, and the
-  `raw controlling` badge (owner label) plus the agent pointer are unchanged.
-
-## [0.8.0] - 2026-11-10
+The multi-agent release: a shared blackboard and terminal topology, per-agent
+tabs that never steal the human's focus, per-origin approvals, and a browser
+tool surface that grew from 16 to 29 tools.
 
 ### Added
 
@@ -22,12 +16,13 @@ follow Semantic Versioning.
 - **Verify evidence**: `raw_task verify` attaches a screenshot, URL and title of
   the agent's tab to the verdict, and verification is no longer cut off by the
   generic 2-minute local-tool timeout.
-- **Tab ownership** (`raw_claim`, `raw_release`, `raw_close`): each agent claims
-  its own tabs and cannot act on another agent's. `raw_tabs` reports the owner
-  per tab and never re-points the agent at the human's active tab; `raw_goto`
-  opens a new tab when the agent has none. The label is shown on the tab banner.
-  Agent tabs open in the background so the human keeps focus; naming another
-  agent's `tabId` still works for cooperation and reports the owner.
+- **Tab ownership** (`raw_claim`, `raw_release`, `raw_close`, `raw_clone`): each
+  agent claims its own tabs, tagged with a model-chosen label that is painted on
+  the tab banner. `raw_tabs` reports the owner per tab and never re-points the
+  agent at the human's active tab; `raw_goto` opens a new tab when the agent has
+  none. Agent tabs open in the background, so the human keeps focus. Another
+  agent's tab is read-only: reads work and report the owner, while `raw_clone`
+  copies its URL and scroll position into a tab the agent owns.
 - **raw.mesh (Blackboard & Mailbox)**: Zero-dependency cross-agent collaboration engine
   built natively on Node 22 `node:sqlite` (WAL mode). Persistent tasks, defensive XML
   envelope packaging to prevent tag escaping, and SHA-256 content-addressed artifact storage.
@@ -39,14 +34,13 @@ follow Semantic Versioning.
   and validates `exitCode === 0` with protected test file baseline enforcement.
 - **Compact MCP Facade Tools**: Added folded MCP tools `raw_task` and `raw_term` to prevent
   context window inflation while exposing full multi-agent orchestration capabilities on demand.
+- **Browser tools**: `raw_press`, `raw_select`, `raw_scroll`, `raw_wait`,
+  `raw_group` (one Chrome tab group per agent; the extension now requests the
+  `tabGroups` permission, reload it once) and `raw_run` (a JavaScript snippet
+  bound to the agent's tab), for 29 MCP tools in total.
 
 ### Changed
 
-- Foreign tabs are read-only for other agents; `raw_clone` copies a tab's URL and
-  scroll position into the agent's own tab instead of taking it over.
-- New MCP tools: `raw_press`, `raw_select`, `raw_scroll`, `raw_wait`,
-  `raw_group` (Chrome tab groups per agent) and `raw_run` (a snippet bound to the
-  agent's tab).
 - Large payloads are compacted: `raw_task list` returns summaries, `poll` takes a
   limit, and failing check output is truncated.
 - The installer selects `browser-profiles/current.json` when one browser is
@@ -54,6 +48,11 @@ follow Semantic Versioning.
 - `raw-bridge --help` and argument errors no longer require a bridge config.
 - Extension bridge draws agent pointer animations and synchronizes driving runtime identity
   via MAIN-world DOM reflection.
+- The extension bridge replaces the border glow with a dense dot field lit by slow
+  waves: the source is a circle whose radius is half a period and whose centre sits
+  below the viewport, so wavefronts climb out of the bottom edge. Dots have a fixed
+  size, exist only while a crest lights them, and the `raw controlling` badge (owner
+  label) plus the agent pointer are unchanged.
 - Bridge navigation normalizes a bare host name (`raw_goto example.com`) instead of
   sending it to `Page.navigate` as an invalid URL.
 - An unreachable bridge now names the browser, the port and the install command
@@ -318,8 +317,8 @@ follow Semantic Versioning.
 - Strict TypeScript checking, a locked development toolchain, and full CLI protocol, setup, and permission smoke tests now gate publication.
 - Browser smoke testing uses a disposable profile and covers forms, iframes, downloads, screenshots, isolated spaces, cleanup, and CPU timeouts.
 
-[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.7.0...HEAD
-[0.8.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.8.0
+[Unreleased]: https://github.com/liutingqiu/raw-browser/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.9.0
 [0.7.0]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.7.0
 [0.6.2]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.2
 [0.6.1]: https://github.com/liutingqiu/raw-browser/releases/tag/v0.6.1

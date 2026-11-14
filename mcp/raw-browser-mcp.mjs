@@ -1450,7 +1450,7 @@ async function handle(message) {
     reply(id, {
       protocolVersion: params?.protocolVersion || "2024-11-05",
       capabilities: { tools: {} },
-      serverInfo: { name: "raw-browser", version: "0.8.0" },
+      serverInfo: { name: "raw-browser", version: "0.9.0" },
     });
     return;
   }
