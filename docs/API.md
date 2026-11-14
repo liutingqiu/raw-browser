@@ -242,11 +242,6 @@ not ownership-checked, so agents should not use it to reach foreign tabs.
 | `raw_group` | `label`?, `color`?, `group`? | Put this agent's tabs into one Chrome tab group |
 | `raw_run` | `code`, `timeoutMs`?, `tabId`? | Run a snippet with `page` bound to the agent's tab |
 
-Payloads are compacted for long sessions: `raw_task list` returns summaries
-(no `context_data` / `contract_spec` / `result_data`), `raw_task poll` accepts
-`limit` (default 50) and reports `truncated`, and each failing check's
-`stdout`/`stderr` is cut to 4 000 characters with `outputTruncated: true`.
-
 ## MCP origin permissions
 
 `$RAW_HOME/permissions.json` controls navigation:
@@ -259,51 +254,3 @@ Payloads are compacted for long sessions: `raw_task list` returns summaries
 With `ask`, navigation fails with the origin and the human approves through
 `raw_approve { "origin": "...", "scope": "session" | "persistent" }`. Non-http
 schemes (`file:`, `about:`, `data:`) are outside the origin model.
-
-`raw_task verify` also attaches best-effort evidence when the agent has a
-claimed tab: a screenshot under `$RAW_HOME/evidence/<task>.png` plus the page
-URL and title. Verification is allowed to run up to `RAW_VERIFY_MAX_MS`
-(default 30 minutes) instead of the generic 2-minute local tool cap.
-
-## MCP multi-agent tools
-
-The stdio server exposes two folded tools so a team of agents shares one
-blackboard and one terminal topology without adding a dozen tool schemas.
-Parameters are camelCase; snake_case aliases listed below are accepted, and an
-unknown key is rejected instead of being dropped.
-
-### `raw_task`
-
-| `action` | Parameters | What it does |
-|---|---|---|
-| `create` | `title`, `creator`, `assignee`, `contextData`, `contractSpec` | Create a task and dispatch a `task_request` envelope to the assignee |
-| `send` | `sender`, `recipient`, `msgType`, `payload` (or `text`), `taskId`? | Post a mailbox message; without `taskId` it starts a new thread |
-| `poll` | `recipient`, `unreadOnly` (default `true`), `markRead` | Read the inbox as XML envelopes |
-| `list` | `assignee`, `status`, `limit` (default 20, max 500) | List tasks, newest first |
-| `get` | `taskId` | Fetch one task |
-| `update` | `taskId`, `status`, `resultData` | Change status; the value must be one of `draft`, `dispatched`, `running`, `verifying`, `completed`, `failed`, `blocked` |
-| `submit_artifact` | `taskId`, `author`, `artifactType`, `content` | Store content-addressed content; the same bytes may belong to several tasks |
-| `verify` | `taskId`, `cwd` | Run the task's contract and record `completed` / `failed` |
-
-Aliases: `task_id`, `artifact_type`, `msg_type`, `context_data`,
-`contract_spec`, `result_data`, `unread_only`, `mark_read`.
-
-`verify` executes every `checks[]` entry in a shell, compares the real exit
-code to `expectedExitCode` (default 0), and returns `verified` only when all
-checks pass. `protectedFiles` are compared against their committed `HEAD`
-version: a protected file that is missing, untracked, or changed refutes the
-contract even when the checks pass. A check that exceeds `timeoutMs` has its
-whole process tree killed and is reported as a timeout.
-
-### `raw_term`
-
-| `action` | Parameters | What it does |
-|---|---|---|
-| `list` | `session`? | List panes; without a reachable tmux server it returns an empty `panes` array and a note |
-| `peek` | `target`, `lines` (max 500) | Read a pane and record the Read-Before-Act guard |
-| `wake` | `target`, `taskId` | Type `raw pickup <taskId>` after the guard check |
-| `name` | `target`, `name` | Set the pane title |
-
-`wake` refuses a pane that was not peeked at within the last 60 seconds, so a
-signal never lands in the middle of a human typing. `taskId` must match
-`^[a-zA-Z0-9_-]{1,64}$`.

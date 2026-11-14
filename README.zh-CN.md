@@ -18,6 +18,17 @@
 
 ---
 
+## 它是什么
+
+- **用的是浏览器，不是另开一个浏览器。** 扩展桥直接接在你日常用的 Chrome / Edge
+  profile 上，登录态、cookie、扩展都现成。
+- **一段脚本，一个任务。** 多步操作写成一个带循环、判断和等待的 JavaScript 程序，
+  而不是每点一次就往返模型一次。
+- **一层浏览器工具。** CLI、脚本运行时和 stdio MCP server，共 27 个工具：
+  导航、读页面、输入、等待、截图、浏览器能力。
+
+它只做浏览器这一层：不是任务调度器，不是终端管理器，也不含模型。
+
 ## 快速开始
 
 需要 **Node.js 22.21+**，以及 Chrome 或 Edge。
@@ -28,10 +39,10 @@ raw status
 raw run -e "const p = await page.newTab('https://example.com'); console.log(await p.title()); await p.closeTab()"
 ```
 
-直连 CDP 模式下，首次运行会在 `~/.raw/` 下启动一个专用浏览器 profile，并在
-多次运行之间保留，登录状态不会丢。
+直连 CDP 模式下，第一次运行会在 `~/.raw/` 下起一个专属浏览器 profile，
+之后一直沿用，登录态不会丢。
 
-或者从源码安装：
+从源码装：
 
 ```bash
 git clone https://github.com/liutingqiu/raw-browser.git
@@ -43,18 +54,9 @@ raw status
 ```
 
 需要固定版本或离线安装时，可以用每个
-[Release](https://github.com/liutingqiu/raw-browser/releases/latest) 附带的
-`raw-browser.tgz`。扩展桥安装脚本在 npm 包和克隆仓库里都有；全局安装时用
-`node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs"` 运行。
-
-## 为什么是 raw-browser
-
-- **就是你的浏览器。** 扩展桥挂载到你日常使用的 Chrome / Edge profile，
-  登录态、Cookie、扩展本来就在那里。
-- **一段脚本，一个任务。** 多步任务写成一个带循环、条件、等待的 JavaScript
-  程序，而不是每点一次就模型往返一次。轮次更少、成本更低、状态不用反复重读。
-- **运行时零依赖。** 只用 Node 内置的 `fetch` 与 `WebSocket`；`npm install`
-  只安装开发用的 TypeScript 和 Node 类型。
+[release](https://github.com/liutingqiu/raw-browser/releases/latest) 附带的
+`raw-browser.tgz`。扩展桥的安装脚本在 npm 包和源码里都有；全局安装后这样跑：
+`node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs"`。
 
 ## 一段脚本，一个任务
 
@@ -69,11 +71,11 @@ await p.fill('role=textbox', 'Initech');
 await p.click('text=Initech');
 
 const file = await p.waitForDownload(() => p.click('text=Export CSV'));
-console.log(file.path);                      // orders.csv 已落盘
+console.log(file.path);                      // orders.csv 已经落盘
 await p.closeTab();
 ```
 
-从文件运行：
+从文件跑：
 
 ```bash
 node dist/browser-cli.js run < demo/example.mjs
@@ -89,55 +91,35 @@ raw run -e "const p = await page.newTab('example.com'); console.log(await p.snap
 
 | 方面 | 能力 |
 |---|---|
-| **定位器** | 快照编号（`#12`）、CSS、XPath、`text=`、`:has-text()`、`role=…[name=…]`；穿透开放 Shadow DOM 与同源 iframe |
-| **输入** | 真实 CDP 鼠标/键盘事件、按键位掩码、拖拽路径插值、组合键、文件选择 |
-| **富文本编辑器** | Monaco、CodeMirror 5/6、contenteditable、React 受控输入，并回报实际使用的写入策略 |
-| **等待** | 导航、弹窗、下载、文件选择框、DOM 变更、网络响应、函数与 URL |
-| **读取** | 编号快照、无障碍树、文本/HTML、frame 列表（含跨域） |
-| **浏览器能力** | 标签页、Cookie、代理、历史、书签、扩展、下载、通知、CSS 注入 |
-| **隔离** | `--space` 创建独立 Cookie / 缓存 / 存储的浏览器上下文（直连 CDP 模式） |
-| **Agent 集成** | CLI、JavaScript 脚本 API、16 个工具的 MCP server |
+| **定位** | 快照编号（`#12`）、CSS、XPath、`text=`、`:has-text()`、`role=…[name=…]`；开放 shadow DOM 与同源 iframe |
+| **输入** | 真实 CDP 鼠标/键盘事件、按键位掩码、带插值的拖拽路径、组合键、文件上传 |
+| **富文本编辑器** | Monaco、CodeMirror 5/6、contenteditable、React 受控输入，并回报用的是哪种策略 |
+| **等待** | 导航、弹窗、下载、文件选择器、DOM 变化、网络响应、自定义函数与 URL |
+| **读取** | 带编号快照、无障碍树、文本/HTML、frame（含跨域） |
+| **浏览器能力** | 标签页、cookie、代理、历史、书签、扩展、下载、通知、注入 CSS |
+| **隔离** | `--space` 起一个独立 browser context，cookie、缓存、存储互不影响（仅直连模式） |
+| **Agent 接入** | CLI、JavaScript 脚本 API、27 个工具的 MCP server |
 
 完整脚本 API 见 [docs/API.md](docs/API.md)。
-
-## 常见问题
-
-**这是 Playwright 的替代品吗？**
-Playwright 是完整的测试框架，自带浏览器上下文、runner 和断言。`raw` 是给
-Agent 用的小型运行时：它可以驱动你已经登录的 profile，并把一段脚本当作一个
-任务。两者解决的问题不同，可以共存。
-
-**它会隐藏自动化、绕过反爬吗？**
-不会。没有 stealth 补丁，不覆盖 `navigator.webdriver`，不做指纹伪造。拦截
-自动化的站点仍然能看到调试器已挂载。
-
-**会上传 Cookie 或页面数据吗？**
-不会。运行时与桥接只在本机工作，监听 `127.0.0.1`。页面内容，以及脚本显式
-请求的 Cookie 值，会交给调用它的 Agent，因此边界是 Agent 的权限模式。
-
-**支持哪些浏览器？**
-Chrome 与 Microsoft Edge（Chromium）。直连 CDP 模式也可以驱动其他 Chromium
-构建。
 
 ## 工作原理
 
 ![raw-browser 架构](assets/architecture.svg)
 
-有两条到达浏览器的路径：
+两种方式能碰到浏览器：
 
-1. **直连 CDP** —— `raw` 用 `--remote-debugging-port` 启动一个专用 Chromium
-   profile（默认 `9222`）。跨平台、支持隔离 space、不需要扩展。
-2. **扩展桥** —— MV3 扩展用 `chrome.debugger` 挂到真实标签页，通过 stdio 与
-   .NET 原生宿主通信；宿主在本地回环暴露带 token 的 CDP facade。Edge 用
-   `9333`，Chrome 用 `9334`。这条路径驱动的就是你已登录的 profile。
+1. **直连 CDP** —— `raw` 自己起一个专属 Chromium profile，带
+   `--remote-debugging-port`（默认 `9222`）。跨平台、支持隔离空间、不需要装扩展。
+2. **扩展桥** —— 一个 MV3 扩展用 `chrome.debugger` 操作真实标签页，通过 stdio 跟一个
+   .NET 原生宿交通信，宿主只在 loopback 上开一个带 token 的 CDP 门面。Edge 用 `9333`，
+   Chrome 用 `9334`。**驱动你已登录 profile 的就是这条路。**
 
-桥接只监听 `127.0.0.1`，每个浏览器一份随机 token，校验 `Host` 头，并拒绝
-不属于自己的调试端口。扩展不会自行复制或记录 Cookie；只有脚本显式调用
-Cookie API 时才会返回 Cookie 值。
+桥只监听 `127.0.0.1`，每个浏览器一把随机 token，校验 `Host` 头，并拒绝不属于自己的调试端口。
+扩展本身不会复制或记录 cookie；只有脚本显式调用 cookie API 时才返回具体值。
 
 ## 驱动已登录的浏览器
 
-桥接安装器支持 Windows / macOS / Linux；直连 CDP 模式同样三平台可用。
+安装脚本支持 Windows、macOS、Linux，直连模式三平台也都能用。
 
 ```bash
 # 全局 npm 安装（macOS / Linux）
@@ -147,77 +129,79 @@ node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs" --browser both
 node scripts/install-edge-bridge.mjs --browser both
 ```
 
-Windows 上同一条 Node 命令会转交给 PowerShell 安装器；也可以直接运行：
+Windows 上这条 Node 命令会自动转到 PowerShell 脚本；也可以直接跑它：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$(npm root -g)\raw-browser\scripts\install-edge-bridge.ps1" -Browser both
 ```
 
-安装器会发布自包含的原生宿主，生成独立的
-`~/.raw/edge-bridge.json` 与 `~/.raw/chrome-bridge.json`，并注册所选浏览器的
-Native Messaging 宿主：Windows 写 HKCU，macOS 写到
-`~/Library/Application Support` 下的 `NativeMessagingHosts`，Linux 写到
-`~/.config` 下。没有 .NET 9 SDK 时，它会从
-[Releases](https://github.com/liutingqiu/raw-browser/releases) 下载匹配版本的
-预编译宿主，并在有 `SHA256SUMS.txt` 时校验。也可以用 `--host-path`
-安装自己编译的宿主，或用 `--build-from-source` 强制本地编译。
+安装器会发布一个自包含的原生宿主，把两把互相独立的 token 写进
+`~/.raw/edge-bridge.json` 和 `~/.raw/chrome-bridge.json`，并注册对应的
+native messaging 宿主：Windows 走 HKCU，macOS 放在
+`~/Library/Application Support` 下的 `NativeMessagingHosts`，Linux 放在 `~/.config` 下。
+如果本机没有 .NET 9 SDK，它会从 [Releases](https://github.com/liutingqiu/raw-browser/releases)
+下载对应平台的预编译宿主，并在有 `SHA256SUMS.txt` 时校验。
+想装自己编译的宿主用 `--host-path`，强制本地编译用 `--build-from-source`。
 
-宿主始终安装在 `~/.raw/edge-bridge/current/`，升级时原地替换，上一版留在
-`previous/` 便于回滚，Native Messaging 清单不会因升级改路径。
+宿主固定放在 `~/.raw/edge-bridge/current/`，这样升级时 native messaging 清单不用改路径；
+安装器原地替换可执行文件，并保留上一份用于回滚。
 
-浏览器和宿主必须在同一个操作系统里。Windows 的 Chrome 不能使用装在 WSL
-里的宿主：要驱动 Windows 浏览器就用 Windows 安装器；要在 WSL 里用桥接，就
-在 WSL 内安装 Linux 版 Chrome / Edge（需要 WSLg），再运行这个安装器。Snap 和
-Flatpak 沙箱里的浏览器不会读取安装器写入的用户级 Native Messaging 目录，
-桥接请使用 deb/rpm 或 app bundle 安装的浏览器。
+浏览器和宿主必须在同一个操作系统里。Windows 的 Chrome 用不了装在 WSL 里的宿主：
+要么给 Windows 浏览器跑 Windows 版安装器，要么在 WSL（带 WSLg）里装一个 Linux 版
+Chrome/Edge 再在那儿跑安装器。Snap / Flatpak 沙箱里的浏览器读不到安装器写的用户级
+native messaging 目录，桥接要用 deb/rpm 或 app bundle 安装的浏览器。
 
-然后在每个要驱动的浏览器里加载一次解压扩展：
+然后每个浏览器加载一次扩展：
 
-1. 打开 `edge://extensions` 或 `chrome://extensions`；
-2. 开启「开发人员模式」；
-3. 选择「加载解压缩的扩展」，指向安装器输出的 `ExtensionPath`
-   （克隆仓库里是 `edge-bridge/extension`）。
+1. 打开 `edge://extensions` 或 `chrome://extensions`。
+2. 打开「开发者模式」。
+3. 点「加载解压缩的扩展」，选安装器输出的 `ExtensionPath`（源码里是
+   `edge-bridge/extension`）。
 
-在 `~/.raw/browser-profiles/current.json` 中选择桥：
+在 `~/.raw/browser-profiles/current.json` 里选定走哪座桥：
 
 ```json
 { "mode": "edge-extension" }
 ```
 
-或 `{ "mode": "chrome-extension" }`。`raw status` 会显示当前桥、端口和扩展版本。
-如果升级后桥接没有连上，重启一次浏览器：它会在进程生命周期内缓存
-Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏览器后再运行一次
-安装脚本并加上 `--clean-legacy-hosts`（PowerShell 里是 `-CleanLegacyHosts`），
-即可删除旧的 `host-*` 目录。
+或者 `{ "mode": "chrome-extension" }`。`raw status` 会打印当前选的桥、端口和扩展版本。
+升级后如果桥连不上，重启一次浏览器：它在进程生命周期内缓存了 native messaging 宿主的路径。
+从老版本安装器升上来？先重启浏览器，再带 `--clean-legacy-hosts`（PowerShell 里是
+`-CleanLegacyHosts`）跑一次安装器，清掉旧的 `host-*` 目录。
 
 ## CLI
 
 | 命令 | 说明 |
 |---|---|
-| `raw status` | 显示调试端口、桥、profile 与浏览器路径 |
-| `raw run` | 从 stdin 读取脚本执行 |
-| `raw run -e "<code>"` | 执行内联脚本 |
+| `raw status` | 显示调试端口、桥、profile 和浏览器可执行文件 |
+| `raw run` | 从 stdin 读脚本执行 |
+| `raw run -e "<code>"` | 执行一段内联脚本 |
 
 | 选项 | 说明 |
 |---|---|
 | `--timeout-ms N` | 脚本超时（默认 `180000`） |
-| `--space NAME` | 在隔离的浏览器上下文中运行（直连模式） |
-| `--headless` | 浏览器未运行时以无界面启动 |
+| `--space NAME` | 在独立 browser context 里跑（仅直连模式） |
+| `--headless` | 浏览器没在跑时用 headless 启动 |
 | `--profile PATH` | 覆盖持久化 profile 目录 |
 | `--port N` | 覆盖 CDP 端口 |
 | `--browser PATH` | 指定 Chrome / Edge 可执行文件 |
 | `--downloads PATH` | 覆盖下载目录 |
-| `--output-dir PATH` | 内联图片的落盘目录 |
+| `--output-dir PATH` | 内联图片写到哪儿 |
+
+另外还有 `raw-bridge.mjs`，就是 MCP server 驱动的那个单命令 JSON 门面
+（`tabs`、`goto`、`eval`、`snapshot`、`click`、`fill`、`press`、`scroll`、
+`screenshot`、`cookies`、`frames`、`call` 等）。每条命令都输出 JSON，退出码有意义。
 
 ## MCP server
 
-`npm install -g raw-browser` 会同时安装 `raw-mcp`，这是一个 stdio MCP server，
-把运行时暴露为 29 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
-`raw_claim`、`raw_release`、`raw_close`、`raw_clone`、`raw_approve`、`raw_new`、
-`raw_goto`、`raw_text`、`raw_html`、`raw_eval`、`raw_snapshot`、`raw_click`、
-`raw_fill`、`raw_press`、`raw_select`、`raw_scroll`、`raw_wait`、`raw_group`、
-`raw_run`、`raw_visit`、`raw_screenshot`、`raw_cookies`、`raw_frames`、逃生舱
-`raw_call`，以及两个多 Agent 工具 `raw_task` 和 `raw_term`。
+`npm install -g raw-browser` 会一并装上 `raw-mcp`，一个 stdio MCP server，把运行时
+暴露成 27 个工具：
+
+`raw_use`、`raw_status`、`raw_tabs`、`raw_claim`、`raw_release`、`raw_close`、
+`raw_clone`、`raw_approve`、`raw_new`、`raw_goto`、`raw_text`、`raw_html`、
+`raw_eval`、`raw_snapshot`、`raw_click`、`raw_fill`、`raw_press`、`raw_select`、
+`raw_scroll`、`raw_wait`、`raw_group`、`raw_run`、`raw_visit`、`raw_screenshot`、
+`raw_cookies`、`raw_frames`，以及逃生舱 `raw_call`。
 
 ```json
 {
@@ -231,7 +215,7 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 }
 ```
 
-从源码目录运行时，改为指向 `mcp/raw-browser-mcp.mjs`：
+从源码跑的话，直接指向 `mcp/raw-browser-mcp.mjs`：
 
 ```json
 {
@@ -246,44 +230,46 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 }
 ```
 
-服务端会记住当前标签页，截图以 image content 返回，工具调用串行执行，并支持
-取消。`raw-bridge.mjs` 不在服务端旁边时用 `RAW_CLI` 指定；用
-`RAW_BRIDGE_BROWSER=edge|chrome` 选择桥。该 server 已登记在
-[HOL Guard](https://github.com/hashgraph-online/hol-guard) 的 MCP 目录中
-（`mcp.raw-browser`）：只读工具沿用默认策略，导航、输入和 Cookie 读取需要复核，
-`raw_eval` / `raw_call` 被阻止。
+server 会记住当前标签页，截图以 image 内容返回，工具调用串行执行，并支持取消。
+`raw-bridge.mjs` 不在 server 旁边时用 `RAW_CLI` 指定，用
+`RAW_BRIDGE_BROWSER=edge|chrome` 选桥。这个 server 已收录进
+[HOL Guard](https://github.com/hashgraph-online/hol-guard) 的 MCP 目录（条目名
+`mcp.raw-browser`）：只读工具走普通策略，导航、输入和读 cookie 需要审核，
+`raw_eval` / `raw_call` 直接拦掉。
 
 ### 标签页归属
 
-每个 Agent 认领自己的标签页，而且 **Agent 的标签页一律在后台新开**，不抢人类的焦点。
-`raw_claim` 新开（或接管）一个标签页，记下模型自己起的 label，并且**自动放进一个 Chrome
-标签组**——一个任务一个组，组名由模型通过 `group` 决定（默认等于 label）。哪怕只开一个页
-也会成组，这样 Agent 的标签页和人类的一眼就能分开。
+多个 Agent 可以共用一个浏览器而不抢标签页。每个 Agent 认领自己的标签页，而且
+**Agent 的标签页一律后台打开**：人看他的页面，焦点不被打断。`raw_claim` 会开一个
+标签页（或者接管指定的那个），记下模型起的 label（显示在标签页横幅和 `raw_tabs` 里），
+并**把它收进一个 Chrome 标签组**——按任务分组，组名由模型通过 `group` 指定
+（默认用 label）。哪怕只有一个标签页也会分组，这样 Agent 的页和人的页永远分得开。
 
-Agent 之间仍然可以配合，但只能读：显式传入别人的 `tabId` 可以读取
-（`raw_text` / `raw_html` / `raw_snapshot` / `raw_screenshot` / `raw_frames`），
-返回里带一行 `[note: tab ... belongs to "..."]`。任何会改页面的动作 ——
-`click`、`fill`、`press`、`select`、`scroll`、`eval`、`goto` —— 在别人的标签页上
-会被拒绝，并提示用 `raw_clone` 复制一份（URL + 滚动位置）到自己的新标签页再操作。
-只有「不指定 tabId」的隐式目标被限制在自己的标签页，所以不会悄悄落到别人的页面上。
-没有自己的标签页时 `raw_goto` 会新开一个。`raw_tabs` 只读；`raw_release` 归还；
-`raw_close` 关闭，关别人的标签页需要 `force: true`。改 label 会保留已认领的标签页。
-`raw_group` 把本 Agent 的标签页收进一个以 label 命名的 Chrome 标签组
-（升级后需要重新加载一次扩展：这次新增了 `tabGroups` 权限）。归属存在
-`$RAW_HOME/tab-owners-<browser>.json`，所有 Agent 进程共享。
+Agent 之间可以配合，但是只读：显式传别的 Agent 的 `tabId` 可以读
+（`raw_text`、`raw_html`、`raw_snapshot`、`raw_screenshot`、`raw_frames`），
+结果里会带一行 `[note: tab ... belongs to "..."]`。任何会改动页面的动作——
+`click`、`fill`、`press`、`select`、`scroll`、`eval`、`goto`——在别人的页上会被拒，
+并提示用 `raw_clone` 把 URL 和滚动位置复制成一个归自己的新标签页。
+只有「不传 tabId」的隐式目标被限制在自己的页里，所以不会有操作悄悄落到别人页面上；
+`raw_goto` 在自己没有页时会新开一个。`raw_tabs` 是只读的，按页报告 `owner` / `owned`。
+`raw_release` 归还标签页；`raw_close` 关掉它，关别人的页需要 `force: true`。
+改名不会丢已经认领的页。`raw_group` 可以重新分组、`ungroup: true` 去掉分组装饰、
+`close: true` 在任务结束时关掉整组——用不上的页要及时关，多 Agent 并行时尤其如此。
+（升级后需要重新加载一次扩展：它新声明了 `tabGroups` 权限。）
+归属信息存在 `$RAW_HOME/tab-owners-<browser>.json`，所有 Agent 进程共享。
+`raw_call` 是受信任的逃生舱，不做归属校验。
 
 ### 用代码驱动
 
-`raw_run` 接收一段绑定到本 Agent 标签页的 JS：`page.goto/click/fill/press/scroll/
-select/text/html/eval/snapshot/screenshot/waitFor`，外加 `sleep` 和 `console`。
-一次调用可以填表、提交、读结果，不用来回十几次。大结果会被压缩：
-`raw_task list` 只回摘要，`raw_task poll` 有 `limit`（默认 50）并返回 `truncated`，
-失败的 check 输出截断到 4000 字符并标 `outputTruncated`。
+`raw_run` 接收一段绑定在当前 Agent 标签页上的 JavaScript：
+`page.goto/click/fill/press/scroll/select/text/html/eval/snapshot/screenshot/waitFor`，
+外加 `sleep` 和 `console`。一次调用就能填表、提交、读结果，而不是来回十几趟。
 
 ### 站点授权
 
-因为驱动的是人类已登录的真实浏览器，导航可以要求确认。`$RAW_HOME/permissions.json`
-默认 `{"defaultAccess": "allow"}`；可以设成 `"ask"` / `"deny"`，或按站点固定：
+桥驱动的是人已登录的 profile，所以导航可以要求人工确认。
+`$RAW_HOME/permissions.json` 默认是 `{"defaultAccess": "allow"}`；
+可以设成 `"ask"` 或 `"deny"`，也可以按 origin 固定：
 
 ```json
 {
@@ -292,82 +278,89 @@ select/text/html/eval/snapshot/screenshot/waitFor`，外加 `sleep` 和 `console
 }
 ```
 
-`ask` 模式下导航会返回一个带 origin 的错误；人类同意后调用
+设成 `ask` 后，导航会返回一个带 origin 的错误；人同意之后调用
 `raw_approve { "origin": "https://example.com", "scope": "session" }` 放行本次进程，
-`scope: "persistent"` 会写进文件。
+`scope: "persistent"` 则写进文件长期生效。
 
-### 多 Agent 工具
+## 常见问题
 
-`raw_task` 在 `$RAW_HOME/mesh/blackboard.db`（默认 `~/.raw/mesh/blackboard.db`）
-维护一块 SQLite 黑板：建任务时可附带验收契约，支持信箱消息、
-按内容寻址的工件提交，以及跑真实命令看 exitCode 的 `verify`。
-参数以 camelCase 为准，同时接受 `task_id`、`contract_spec` 这类 snake_case
-别名；未知参数会直接报错，不再静默丢弃。`verify` 还会检查 `protectedFiles`：
-文件缺失、未提交到 `HEAD`、或相对 `HEAD` 被改动，都会判为不通过，
-避免任务靠改自己的测试蒙混过关。
+**它是 Playwright 的替代品吗？**
+Playwright 是完整的测试框架，自带 browser context、runner 和断言。`raw` 是给 Agent 用的
+小型运行时：它能驱动你已登录的 profile，并且把一段脚本当作一个任务。
+两者解决的问题不同，可以并存。
 
-`raw_term` 列出 tmux pane、读取指定 pane（同时记录读前守卫），
-并投递 `raw pickup <taskId>` 唤醒信号；60 秒内没 peek 过的 pane 会被拒绝。
+**它会隐藏自动化痕迹或绕过反爬吗？**
+不会。没有 stealth 补丁，不覆盖 `navigator.webdriver`，也不伪造指纹。
+会挡自动化的站点照样能看见一个调试器挂着。
 
-完整参数表见 [docs/API.md](docs/API.md#mcp-multi-agent-tools)。
+**它会上传 cookie 或页面数据吗？**
+不会。运行时和桥都是本地的，只绑 `127.0.0.1`。页面内容和脚本显式请求的 cookie 值
+只发给调用它的 Agent，所以 Agent 的权限模式就是边界。
+
+**支持哪些浏览器？**
+Chrome 和 Microsoft Edge（Chromium）。直连模式也支持其它 Chromium 构建。
+
+**它会帮我拆分和调度任务吗？**
+不会。`raw` 只执行浏览器操作。规划、任务队列和汇报交给驱动它的 Agent 运行时——
+这个边界是刻意划的。
 
 ## 安全模型
 
-- 所有监听器只绑定 `127.0.0.1`，默认拒绝远程连接。
-- 每个 HTTP / WebSocket 请求都需要对应浏览器的 token；比较为常数时间，
-  并校验 `Host` 头。
-- 属于其他进程的调试端口会被拒绝，而不是复用。
-- 脚本运行在 worker 中，超时可以终止 CPU 密集代码。worker 是超时边界，
-  **不是安全沙箱**。
-- `clearBrowsingData` 只清除调用方明确指定的数据类型。
-- 页面内容是不可信输入；不要把未校验的网页文本拼进 shell 命令。
+- 监听只绑 `127.0.0.1`，远端连接直接拒绝。
+- 每个 HTTP 和 WebSocket 请求都要带对应浏览器的 token；比较是常量时间的，
+  并且校验 `Host` 头。
+- 属于别的进程的调试端口会拒绝使用，不会复用。
+- 脚本跑在 worker 里，所以超时能杀掉 CPU 死循环。这个 worker 是**超时边界，
+  不是安全沙箱**。
+- `clearBrowsingData` 只清理调用方点名的数据类型。
+- 页面内容是不可信输入。不要把未校验的页面文本拼进 shell 命令。
 
-`raw` 以当前操作系统用户的权限执行模型生成的脚本。调用它的 Agent 的提示词与
-权限模式才是动作边界。详见 [SECURITY.md](SECURITY.md)。
+`raw` 会以你的操作系统权限执行模型生成的脚本。调用它的 Agent 的提示词和权限模式，
+决定了到底能跑什么。详见 [SECURITY.md](SECURITY.md)。
 
 ## 测试
 
 ```bash
-npm run typecheck   # 严格 TypeScript 检查
-npm test            # 55 个单元测试
+npm run typecheck   # 严格 TypeScript
+npm test            # 83 个单元与集成测试
 npm run build
 npm run smoke:browser
-npm run check       # 以上全部 + 浏览器冒烟测试
+npm run check       # 上面全部，外加真浏览器 smoke
 ```
 
-CI 在 Ubuntu / Windows / macOS × Node 22/24/26 上跑完整套件，另有
-Windows / macOS / Linux 的桥接宿主冒烟测试和依赖审计。
+CI 在 Ubuntu、Windows、macOS 上跑 Node 22 / 24 / 26，另外还有三平台的原生宿主 smoke
+和依赖审计。
 
 ## 已知限制
 
-1. **Native Messaging 需要同一操作系统里的桌面浏览器。** 安装器覆盖
-   Windows / macOS / Linux 上的 Chrome 与 Edge 稳定版；Snap/Flatpak 沙箱浏览器
-   和“WSL 宿主 + Windows 浏览器”的组合不会自动注册。
-2. **单标签页单调试器。** Chromium 同一标签页只允许一个 CDP 调试客户端；
-   并发挂载会互相 detach。
-3. **桥接模式不支持 `--space`。** 扩展无法创建
-   `Target.createBrowserContext` 的等价物。
-4. **浏览器大版本会改变地基。** Chromium 升级偶尔会改变调试行为或权限提示；
-   升级后重新加载扩展或重启浏览器即可。
+1. **native messaging 要求桌面浏览器在同一个系统里。** 安装器覆盖 Windows、macOS、
+   Linux 上稳定版的 Chrome 和 Edge；Snap/Flatpak 沙箱浏览器、以及 WSL 到 Windows
+   浏览器的组合不在支持范围。
+2. **一个标签页一个调试器。** Chromium 只允许一个 CDP 客户端连同一个标签页，
+   多个客户端会互相踢掉。
+3. **桥模式没有 `--space`。** 扩展造不出 `Target.createBrowserContext` 的等价物。
+4. **浏览器升级会改变地基。** Chromium 大版本偶尔会改调试器行为或权限提示；
+   升级后重新加载扩展或重启浏览器。
 
 ## 参与贡献
 
-欢迎 issue 与 pull request。见 [CONTRIBUTING.md](CONTRIBUTING.md) 与
-[更新日志](CHANGELOG.md)。安全问题请按 [SECURITY.md](SECURITY.md) 使用
-GitHub 私有漏洞报告。
+欢迎提 issue 和 PR，见 [CONTRIBUTING.md](CONTRIBUTING.md) 和
+[更新日志](CHANGELOG.md)。安全问题请走 GitHub 的私密漏洞报告，方式见
+[SECURITY.md](SECURITY.md)。
 
-如果 raw-browser 帮你省下了几次模型往返，点个 star 能让更多人看到它。
+如果 raw-browser 帮你省了几趟模型往返，点个 star 能让更多人找到它。
 
 ## 致谢
 
-raw-browser 的 API 与产品思路受到这些先行项目的影响：
+raw-browser 的 API 和产品思路参考了这些先行者：
 
-- [Playwright](https://github.com/microsoft/playwright)（Apache-2.0）：其
-  locator 与自动等待模型影响了 `page.*` 的设计。
-- [ego-lite](https://github.com/CitroLabs/ego-lite)（MIT）：其“共享浏览器中的
-  隔离 Space”和“把已登录 profile 交给 Agent”的思路影响了隔离设计。
+- [Playwright](https://github.com/microsoft/playwright)（Apache-2.0）：
+  locator 与自动等待模型塑造了 `page.*` 的接口。
+- [ego-lite](https://github.com/CitroLabs/ego-lite)（MIT）：
+  共享浏览器的 Spaces 和已登录 profile 的思路影响了隔离设计。
 
-raw-browser 是直接基于 Chrome DevTools Protocol 的独立实现，不依赖上述项目。
+raw-browser 是直接基于 Chrome DevTools Protocol 的独立实现，没有把上面任何一个
+列为依赖。
 
 ## 开源许可
 

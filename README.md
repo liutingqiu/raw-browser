@@ -18,6 +18,18 @@ English | [简体中文](README.zh-CN.md)
 
 ---
 
+## What it is
+
+- **A browser, not a new browser.** The extension bridge attaches to the Chrome or
+  Edge profile you already use — sessions, cookies and extensions included.
+- **One script, one task.** A multi-step job is a single JavaScript program with
+  loops, conditions and waits, instead of one model round-trip per click.
+- **A browser tool layer.** CLI, scripting runtime and a stdio MCP server exposing
+  27 tools: navigation, reading, input, waiting, screenshots and browser surfaces.
+
+It does browser work only. It is not a task orchestrator, not a terminal manager
+and not a model.
+
 ## Quick start
 
 Requires **Node.js 22.21+** and Chrome or Edge.
@@ -47,17 +59,6 @@ Pinned or offline installs can use the `raw-browser.tgz` tarball attached to eac
 extension bridge installer ships in both the npm package and a clone; a global
 install runs it with
 `node "$(npm root -g)/raw-browser/scripts/install-edge-bridge.mjs"`.
-
-## Why raw-browser
-
-- **Your real browser.** The extension bridge attaches to the Chrome or Edge
-  profile you already use. Sessions, cookies and extensions are already there.
-- **One script, one task.** A multi-step job is a single JavaScript program with
-  loops, conditions and waits — not one model round-trip per click. Fewer
-  round-trips, lower cost, less state to re-read.
-- **Zero runtime dependencies.** The runtime uses Node's built-in `fetch` and
-  `WebSocket`. `npm install` only pulls TypeScript and Node types for
-  development.
 
 ## One script, one task
 
@@ -99,31 +100,9 @@ raw run -e "const p = await page.newTab('example.com'); console.log(await p.snap
 | **Reading** | numbered snapshots, accessibility tree, text/HTML, frames (cross-origin included) |
 | **Browser surfaces** | tabs, cookies, proxy, history, bookmarks, extensions, downloads, notifications, CSS injection |
 | **Isolation** | `--space` creates a browser context with its own cookies, cache and storage (direct CDP mode) |
-| **Agent integration** | CLI, a JavaScript scripting API, and an MCP server with 16 tools |
+| **Agent integration** | CLI, a JavaScript scripting API, and an MCP server with 27 tools |
 
 See [docs/API.md](docs/API.md) for the full scripting reference.
-
-## FAQ
-
-**Is this a Playwright replacement?**
-Playwright is a full test framework with its own browser contexts, runner and
-assertions. `raw` is a small runtime for agents: it can drive the profile you
-are already signed into, and it treats one script as one task. They solve
-different problems and can coexist.
-
-**Does it hide automation or bypass bot detection?**
-No. There is no stealth patching, no `navigator.webdriver` override and no
-fingerprint spoofing. A site that blocks automation will still see a debugger
-attached.
-
-**Does it upload cookies or page data?**
-No. The runtime and bridge are local-only and bind to `127.0.0.1`. Page content,
-and any cookie values a script explicitly requests, go to the calling agent, so
-the agent's permission mode is the boundary.
-
-**Which browsers are supported?**
-Chrome and Microsoft Edge (Chromium). Direct CDP mode also works with Chromium
-builds.
 
 ## How it works
 
@@ -223,16 +202,21 @@ PowerShell) to remove the old `host-*` directories.
 | `--downloads PATH` | override the download directory |
 | `--output-dir PATH` | where inline images are written |
 
+There is also `raw-bridge.mjs`, the single-command JSON facade the MCP server
+drives (`tabs`, `goto`, `eval`, `snapshot`, `click`, `fill`, `press`, `scroll`,
+`screenshot`, `cookies`, `frames`, `call`, …). Every command prints JSON and
+sets a meaningful exit code.
+
 ## MCP server
 
 `npm install -g raw-browser` also installs `raw-mcp`, a stdio MCP server that
-exposes the runtime as 29 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
-`raw_claim`, `raw_release`, `raw_close`, `raw_clone`, `raw_approve`, `raw_new`,
-`raw_goto`, `raw_text`, `raw_html`, `raw_eval`, `raw_snapshot`, `raw_click`,
-`raw_fill`, `raw_press`, `raw_select`, `raw_scroll`, `raw_wait`, `raw_group`,
-`raw_run`, `raw_visit`, `raw_screenshot`, `raw_cookies`, `raw_frames`, the
-`raw_call` escape hatch, plus the two multi-agent tools `raw_task` and
-`raw_term`.
+exposes the runtime as 27 tools:
+
+`raw_use`, `raw_status`, `raw_tabs`, `raw_claim`, `raw_release`, `raw_close`,
+`raw_clone`, `raw_approve`, `raw_new`, `raw_goto`, `raw_text`, `raw_html`,
+`raw_eval`, `raw_snapshot`, `raw_click`, `raw_fill`, `raw_press`, `raw_select`,
+`raw_scroll`, `raw_wait`, `raw_group`, `raw_run`, `raw_visit`, `raw_screenshot`,
+`raw_cookies`, `raw_frames`, and the `raw_call` escape hatch.
 
 ```json
 {
@@ -271,13 +255,13 @@ cookie reads are reviewed, and `raw_eval` / `raw_call` are blocked.
 
 ### Tab ownership
 
-Every agent claims its own tabs, and agent tabs always open in the background:
-the human keeps focus on whatever they were reading. `raw_claim` opens a tab
-(or takes an existing one), records the model-chosen label (shown on the tab's
-banner and in `raw_tabs`) and **puts the tab in a Chrome tab group** — one group
-per task, named by the model via `group` (default: the agent label). A single
-agent tab is grouped too, so agent tabs are always distinguishable from the
-human's.
+Several agents can share one browser without fighting over tabs. Each agent
+claims its own tabs, and agent tabs always open in the background: the human
+keeps focus on whatever they were reading. `raw_claim` opens a tab (or takes an
+existing one), records the model-chosen label (shown on the tab's banner and in
+`raw_tabs`) and **puts the tab in a Chrome tab group** — one group per task,
+named by the model via `group` (default: the agent label). A single agent tab is
+grouped too, so agent tabs are always distinguishable from the human's.
 
 Agents still cooperate, but read-only: naming another agent's `tabId` lets you
 read it (`raw_text`, `raw_html`, `raw_snapshot`, `raw_screenshot`, `raw_frames`)
@@ -304,10 +288,7 @@ ownership-checked.
 `raw_run` takes a JavaScript snippet bound to this agent's tab:
 `page.goto/click/fill/press/scroll/select/text/html/eval/snapshot/screenshot/waitFor`,
 plus `sleep` and `console`. One call can fill a form, submit it and read the
-result, instead of a dozen round trips. Large tool payloads are compacted:
-`raw_task list` returns summaries, `raw_task poll` takes a `limit` (default 50)
-and reports `truncated`, and a failing check's output is cut to 4 000 chars
-with `outputTruncated: true`.
+result, instead of a dozen round trips.
 
 ### Origin permissions
 
@@ -326,24 +307,31 @@ With `ask`, a navigation returns an error naming the origin; after the human
 says yes, `raw_approve { "origin": "https://example.com", "scope": "session" }`
 allows it for this process, and `scope: "persistent"` writes it to the file.
 
-### Multi-agent tools
+## FAQ
 
-`raw_task` keeps a SQLite blackboard at `$RAW_HOME/mesh/blackboard.db`
-(`~/.raw/mesh/blackboard.db` by default): create a task with an optional
-acceptance contract, post mailbox messages, submit content-addressed artifacts
-and verify a task by running its contract and reading real exit codes.
-Parameters are camelCase; snake_case aliases such as `task_id` and
-`contract_spec` are accepted, and an unknown key is an error rather than a
-silent no-op. `verify` also refuses to pass when a file named in
-`protectedFiles` is missing, untracked at `HEAD`, or was modified after the
-commit — so a task cannot rewrite its own tests and claim success.
+**Is this a Playwright replacement?**
+Playwright is a full test framework with its own browser contexts, runner and
+assertions. `raw` is a small runtime for agents: it can drive the profile you
+are already signed into, and it treats one script as one task. They solve
+different problems and can coexist.
 
-`raw_term` lists tmux panes, peeks at one (which records the read guard) and
-sends a `raw pickup <taskId>` wake signal. `wake` refuses a pane that has not
-been peeked at within the last 60 seconds.
+**Does it hide automation or bypass bot detection?**
+No. There is no stealth patching, no `navigator.webdriver` override and no
+fingerprint spoofing. A site that blocks automation will still see a debugger
+attached.
 
-The full parameter tables live in
-[docs/API.md](docs/API.md#mcp-multi-agent-tools).
+**Does it upload cookies or page data?**
+No. The runtime and bridge are local-only and bind to `127.0.0.1`. Page content,
+and any cookie values a script explicitly requests, go to the calling agent, so
+the agent's permission mode is the boundary.
+
+**Which browsers are supported?**
+Chrome and Microsoft Edge (Chromium). Direct CDP mode also works with Chromium
+builds.
+
+**Does it plan or split my tasks?**
+No. `raw` executes browser work. Planning, task queues and reporting belong to
+the agent runtime that drives it — that separation is deliberate.
 
 ## Security model
 
@@ -365,7 +353,7 @@ See [SECURITY.md](SECURITY.md).
 
 ```bash
 npm run typecheck   # strict TypeScript
-npm test            # 55 unit tests
+npm test            # 83 unit and integration tests
 npm run build
 npm run smoke:browser
 npm run check       # all of the above plus the browser smoke test

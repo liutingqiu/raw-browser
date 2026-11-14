@@ -227,99 +227,6 @@ test("OriginPermissions: an explicit deny wins over everything", async () => {
   }
 });
 
-test("Verify evidence: a verdict carries the page screenshot and URL", async () => {
-  const world = makeWorld();
-  const a = await boot(world);
-  try {
-    fs.writeFileSync(path.join(world.home, "ok.mjs"), "process.exit(0);");
-    await a.tool("raw_claim", { label: "alpha", url: "https://a.example/" });
-    const created = await a.tool("raw_task", {
-      action: "create",
-      params: {
-        title: "evidence",
-        creator: "a",
-        assignee: "b",
-        contractSpec: { checks: [{ command: "node ok.mjs" }] },
-      },
-    });
-    const task = created.data;
-    const verified = await a.tool("raw_task", {
-      action: "verify",
-      params: { taskId: task.task_id, cwd: world.home },
-    });
-    assert.equal(verified.isError, false, verified.text);
-    assert.equal(verified.data.verdict, "verified");
-    assert.equal(verified.data.evidence.tabId, "1");
-    assert.ok(verified.data.evidence.screenshot.endsWith(`${task.task_id}.png`));
-  } finally {
-    a.close();
-  }
-});
-
-
-test("MCP compaction: list is summary-only and poll honours a limit", async () => {
-  const world = makeWorld();
-  const a = await boot(world);
-  try {
-    const created = await a.tool("raw_task", {
-      action: "create",
-      params: {
-        title: "summary",
-        creator: "a",
-        assignee: "b",
-        contextData: { big: "x".repeat(5000) },
-        contractSpec: { checks: [{ command: "node ok.mjs" }] },
-      },
-    });
-    assert.equal(created.isError, false);
-
-    const listed = await a.tool("raw_task", { action: "list", params: {} });
-    const entry = listed.data[0];
-    assert.equal(entry.has_contract, true);
-    assert.equal(entry.has_context, true);
-    assert.equal("contract_spec" in entry, false);
-    assert.equal("context_data" in entry, false);
-    assert.equal("result_data" in entry, false);
-
-    for (const text of ["one", "two", "three"]) {
-      await a.tool("raw_task", { action: "send", params: { sender: "a", recipient: "bulk", text } });
-    }
-    const polled = await a.tool("raw_task", { action: "poll", params: { recipient: "bulk", limit: 1 } });
-    assert.equal(polled.data.count, 1);
-    assert.equal(polled.data.total, 3);
-    assert.equal(polled.data.truncated, true);
-  } finally {
-    a.close();
-  }
-});
-
-test("MCP compaction: a noisy check is truncated in the verdict", async () => {
-  const world = makeWorld();
-  const a = await boot(world);
-  try {
-    fs.writeFileSync(path.join(world.home, "noisy.mjs"), 'process.stdout.write("x".repeat(10000));');
-    const created = await a.tool("raw_task", {
-      action: "create",
-      params: {
-        title: "noisy",
-        creator: "a",
-        assignee: "b",
-        contractSpec: { checks: [{ command: "node noisy.mjs" }] },
-      },
-    });
-    const verified = await a.tool("raw_task", {
-      action: "verify",
-      params: { taskId: created.data.task_id, cwd: world.home },
-    });
-    assert.equal(verified.isError, false, verified.text);
-    assert.equal(verified.data.results[0].stdout.length, 4000);
-    assert.equal(verified.data.results[0].outputTruncated, true);
-    assert.ok(verified.text.length < 20000, `verdict text was ${verified.text.length} chars`);
-  } finally {
-    a.close();
-  }
-});
-
 test("MCP raw_run: a snippet drives only this agent's tab", async () => {
   const world = makeWorld();
   const a = await boot(world);
@@ -335,19 +242,6 @@ test("MCP raw_run: a snippet drives only this agent's tab", async () => {
     a.close();
   }
 });
-
-test("MCP raw_task: an unknown task says so", async () => {
-  const world = makeWorld();
-  const a = await boot(world);
-  try {
-    const got = await a.tool("raw_task", { action: "get", params: { taskId: "task-nope" } });
-    assert.equal(got.isError, true);
-    assert.match(got.text, /task not found/);
-  } finally {
-    a.close();
-  }
-});
-
 
 test("TabOwnership: every claimed tab joins a model-named task group", async () => {
   const world = makeWorld();
