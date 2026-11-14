@@ -53,6 +53,9 @@ tool surface that grew from 16 to 29 tools.
   below the viewport, so wavefronts climb out of the bottom edge. Dots have a fixed
   size, exist only while a crest lights them, and the `raw controlling` badge (owner
   label) plus the agent pointer are unchanged.
+- The agent pointer eases to each target (150–700 ms depending on distance)
+  instead of a CSS hop, uses a custom 32 px arrow, and drifts inside a small disc
+  while idle. Detach, tab close and navigation still remove it.
 - Bridge navigation normalizes a bare host name (`raw_goto example.com`) instead of
   sending it to `Page.navigate` as an invalid URL.
 - An unreachable bridge now names the browser, the port and the install command
