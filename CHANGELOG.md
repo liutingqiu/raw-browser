@@ -3,14 +3,60 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
-## [Unreleased]
+## [0.8.0] - 2026-11-10
 
 ### Added
 
-- The extension bridge draws a breathing agent-active glow around a controlled
-  tab while raw is issuing commands, with a `raw controlling` badge. It fades
-  after 12 seconds without a command and is removed immediately on detach.
-- The demo dashboard uses the same active-state glow while `run.mjs` is playing.
+- **raw.mesh (Blackboard & Mailbox)**: Zero-dependency cross-agent collaboration engine
+  built natively on Node 22 `node:sqlite` (WAL mode). Persistent tasks, defensive XML
+  envelope packaging to prevent tag escaping, and SHA-256 content-addressed artifact storage.
+- **raw.term (Terminal Visual Topology)**: Native Tmux pane discovery and topology routing.
+  Enforces a strict `Read-Before-Act` guard so agents must observe a pane's state before
+  dispatching wake signals, preventing accidental disruption of active typing.
+- **raw.verify (Acceptance Contract Engine)**: Objective contract verification that rejects
+  agent self-reporting hallucinations. Executes real check commands in isolated child processes
+  and validates `exitCode === 0` with protected test file baseline enforcement.
+- **Compact MCP Facade Tools**: Added folded MCP tools `raw_task` and `raw_term` to prevent
+  context window inflation while exposing full multi-agent orchestration capabilities on demand.
+
+### Changed
+
+- Extension bridge draws agent pointer animations and synchronizes driving runtime identity
+  via MAIN-world DOM reflection.
+- Bridge navigation normalizes a bare host name (`raw_goto example.com`) instead of
+  sending it to `Page.navigate` as an invalid URL.
+- An unreachable bridge now names the browser, the port and the install command
+  instead of surfacing `fetch failed`.
+- The bridge installer falls back to the `latest` release assets when the current
+  version has not been published yet.
+- `check-versions` also covers `package-lock.json`.
+- New installs use `~/.raw/browser-profile` and `~/.raw/downloads`; an existing
+  `codex-*` directory keeps being used so logins survive the upgrade.
+- `raw.mesh` honours `RAW_HOME` for its database location.
+- `raw_task` and `raw_term` no longer wait behind a slow browser call, so a long
+  verification cannot freeze the whole server.
+
+### Fixed
+
+- Verification timeouts kill the whole process tree and return immediately. A check
+  that spawned a long-lived child used to hang `raw_task verify` forever.
+- `protectedFiles` is enforced: a protected file that is missing, untracked at
+  `HEAD`, or modified against `HEAD` refutes the contract.
+- Artifacts are keyed by `(task_id, artifact_hash)`, so identical content submitted
+  to two tasks no longer overwrites the first row. Existing databases migrate on open.
+- A second agent writing at the same moment waits for the lock instead of failing
+  with `database is locked`.
+- `raw_task` accepts snake_case aliases and rejects unknown parameters instead of
+  silently dropping them (`contract_spec` used to be discarded without an error).
+- `raw_task update` rejects an unknown status, and `list` rejects a bad status and a
+  non-numeric `limit` instead of returning an empty list.
+- `raw_task send` with an unknown `taskId` fails instead of creating a ghost task.
+- `raw_term list` with a session lists only that session; a missing tmux server
+  returns an empty list instead of an error. tmux commands now have a 15 s timeout.
+- Message envelopes parse back to their original attribute values.
+- Screenshots larger than 8 MB are returned as a path instead of an inline image.
+- The CLI sets a non-zero exit status from an explicit failure flag rather than by
+  matching an `Error:` prefix in the script output.
 
 ## [0.7.0] - 2026-10-23
 

@@ -53,13 +53,38 @@ function readConfig() {
 const config = readConfig();
 const base = `http://127.0.0.1:${config.port}`;
 const authHeaders = { "X-Raw-Bridge-Token": config.token };
+const bridgeName = isChromeTarget ? "Chrome" : "Edge";
+const installHint =
+  `node scripts/install-edge-bridge.mjs --browser ${isChromeTarget ? "chrome" : "edge"}`;
+
+/**
+ * Bare host names get https; explicit schemes are left alone. The browser
+ * runtime already did this, but the bridge path sent the raw string to
+ * Page.navigate, so `raw_goto example.com` failed with "invalid URL".
+ */
+function normalizeUrl(value) {
+  const url = String(value ?? "").trim();
+  if (!url) return "about:blank";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  return `https://${url}`;
+}
 
 async function http(pathname, init = {}) {
-  const response = await fetch(`${base}${pathname}`, {
-    ...init,
-    headers: { ...authHeaders, ...(init.headers ?? {}) },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let response;
+  try {
+    response = await fetch(`${base}${pathname}`, {
+      ...init,
+      headers: { ...authHeaders, ...(init.headers ?? {}) },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    const cause = error?.cause?.code ? ` (${error.cause.code})` : "";
+    throw new Error(
+      `cannot reach the ${bridgeName} bridge on 127.0.0.1:${config.port}${cause}. ` +
+        `Check that the Raw Browser Bridge extension is loaded in ${bridgeName} and its native host is installed — ` +
+        `install with: ${installHint}`,
+    );
+  }
   if (!response.ok) {
     throw new Error(`${pathname} returned ${response.status}: ${(await response.text()).slice(0, 200)}`);
   }
@@ -133,7 +158,8 @@ function openSocket(kind, tabId) {
 
   const ready = new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve);
-    socket.addEventListener("error", () => reject(new Error(`cannot reach the bridge on port ${config.port}`)));
+    socket.addEventListener("error", () =>
+      reject(new Error(`the ${bridgeName} bridge on 127.0.0.1:${config.port} refused the debugger socket; reload the extension or reinstall the host: ${installHint}`)));
   });
 
   const send = async (method, params = {}) => {
@@ -279,7 +305,8 @@ const commands = {
     }));
   },
 
-  async new(url = "about:blank") {
+  async new(rawUrl = "about:blank") {
+    const url = normalizeUrl(rawUrl);
     // Open blank and navigate afterwards: creating the tab at the target URL
     // races the first evaluate ("Execution context was destroyed").
     const target = await http("/json/new?about%3Ablank", { method: "PUT" });
@@ -288,7 +315,7 @@ const commands = {
       await withPage(id, async (channel) => {
         await channel.send("Page.enable");
         const loaded = waitForLoad(channel, 30_000);
-        const result = await channel.send("Page.navigate", { url: String(url) }, 30_000);
+        const result = await channel.send("Page.navigate", { url }, 30_000);
         if (result?.errorText) throw new Error(`navigation failed: ${result.errorText}`);
         await loaded;
       });
@@ -305,12 +332,13 @@ const commands = {
     return { closed: id };
   },
 
-  async goto(tabId, url) {
+  async goto(tabId, rawUrl) {
+    const url = normalizeUrl(rawUrl);
     const id = await resolveTab(tabId);
     return await withPage(id, async (channel) => {
       await channel.send("Page.enable");
       const loaded = waitForLoad(channel, 30_000);
-      const result = await channel.send("Page.navigate", { url: String(url) }, 30_000);
+      const result = await channel.send("Page.navigate", { url }, 30_000);
       if (result?.errorText) throw new Error(`navigation failed: ${result.errorText}`);
       await loaded;
       const href = await evaluateChannel(channel, "location.href");
@@ -415,14 +443,15 @@ const commands = {
   },
 
   /** open a throwaway tab, navigate, read, and close it in one attach */
-  async visit(url, expression, waitArg) {
+  async visit(rawUrl, expression, waitArg) {
+    const url = normalizeUrl(rawUrl);
     const created = await http("/json/new?about%3Ablank", { method: "PUT" });
     const id = String(created.id);
     try {
       const page = await withPage(id, async (channel) => {
         await channel.send("Page.enable");
         const loaded = waitForLoad(channel, Number(waitArg) || 15_000);
-        const result = await channel.send("Page.navigate", { url: String(url) }, 30_000);
+        const result = await channel.send("Page.navigate", { url }, 30_000);
         if (result?.errorText) throw new Error(`navigation failed: ${result.errorText}`);
         await loaded;
         await ensureHelpers(channel);

@@ -226,10 +226,11 @@ PowerShell) to remove the old `host-*` directories.
 ## MCP server
 
 `npm install -g raw-browser` also installs `raw-mcp`, a stdio MCP server that
-exposes the runtime as 16 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
+exposes the runtime as 18 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
 `raw_new`, `raw_goto`, `raw_text`, `raw_html`, `raw_eval`, `raw_snapshot`,
 `raw_click`, `raw_fill`, `raw_visit`, `raw_screenshot`, `raw_cookies`,
-`raw_frames` and the `raw_call` escape hatch.
+`raw_frames`, the `raw_call` escape hatch, plus the two multi-agent tools
+`raw_task` and `raw_term`.
 
 ```json
 {
@@ -265,6 +266,25 @@ to pick a bridge. The server is registered in the
 [HOL Guard](https://github.com/hashgraph-online/hol-guard) MCP catalog as
 `mcp.raw-browser`: read-only tools inherit normal policy, navigation, input and
 cookie reads are reviewed, and `raw_eval` / `raw_call` are blocked.
+
+### Multi-agent tools
+
+`raw_task` keeps a SQLite blackboard at `$RAW_HOME/mesh/blackboard.db`
+(`~/.raw/mesh/blackboard.db` by default): create a task with an optional
+acceptance contract, post mailbox messages, submit content-addressed artifacts
+and verify a task by running its contract and reading real exit codes.
+Parameters are camelCase; snake_case aliases such as `task_id` and
+`contract_spec` are accepted, and an unknown key is an error rather than a
+silent no-op. `verify` also refuses to pass when a file named in
+`protectedFiles` is missing, untracked at `HEAD`, or was modified after the
+commit — so a task cannot rewrite its own tests and claim success.
+
+`raw_term` lists tmux panes, peeks at one (which records the read guard) and
+sends a `raw pickup <taskId>` wake signal. `wake` refuses a pane that has not
+been peeked at within the last 60 seconds.
+
+The full parameter tables live in
+[docs/API.md](docs/API.md#mcp-multi-agent-tools).
 
 ## Security model
 

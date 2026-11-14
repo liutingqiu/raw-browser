@@ -2256,7 +2256,7 @@ async function closeBrowserLocal() {
 async function runBrowserScriptLocal(
   script: string,
   opts: { timeoutMs?: number; space?: string } = {},
-): Promise<{ text: string; images?: ImagePart[] }> {
+): Promise<{ text: string; images?: ImagePart[]; failed?: boolean }> {
   let page: PageHandle;
   if (opts.space) {
     page = await (await getSpace(opts.space)).page();
@@ -2287,7 +2287,11 @@ async function runBrowserScriptLocal(
     timer = setTimeout(() => reject(new Error(`script exceeded ${timeout}ms`)), timeout);
   });
 
-  const finish = (text: string) => ({ text: truncate(text, 24_000), images: images.length ? images : undefined });
+  const finish = (text: string, failed = false) => ({
+    text: truncate(text, 24_000),
+    images: images.length ? images : undefined,
+    ...(failed ? { failed: true as const } : {}),
+  });
 
   try {
     const value = await Promise.race([
@@ -2304,7 +2308,7 @@ async function runBrowserScriptLocal(
     // can see how far it got instead of losing the whole run.
     const detail = err instanceof Error ? err.message : String(err);
     const head = logs.length ? `${logs.join("\n")}\n\n` : "";
-    return finish(`Error: ${head}script failed — ${detail}`);
+    return finish(`Error: ${head}script failed — ${detail}`, true);
   } finally {
     activeImages = null;
     clearTimeout(timer);
@@ -2454,14 +2458,14 @@ export async function closeBrowser() {
 export async function runBrowserScript(
   script: string,
   opts: { timeoutMs?: number; space?: string; signal?: AbortSignal } = {},
-): Promise<{ text: string; images?: ImagePart[] }> {
+): Promise<{ text: string; images?: ImagePart[]; failed?: boolean }> {
   const { signal, ...workerOpts } = opts;
   if (!isMainThread) return runBrowserScriptLocal(script, workerOpts);
   const timeout = opts.timeoutMs ?? 180_000;
   try {
     return await runtimeRequest({ kind: "run", script, opts: workerOpts }, timeout, 35_000, signal);
   } catch (err) {
-    return { text: `Error: script failed — ${err instanceof Error ? err.message : String(err)}` };
+    return { text: `Error: script failed — ${err instanceof Error ? err.message : String(err)}`, failed: true };
   }
 }
 

@@ -231,24 +231,60 @@ function checksumFor(text, asset) {
   return line ? line.trim().split(/\s+/)[0].toLowerCase() : null;
 }
 
+/**
+ * A version bump lands in package.json before the release is published, so the
+ * versioned asset can 404 while `latest` still has a usable host.
+ */
+export function releaseAssetUrls(releaseBase, version, assetName) {
+  const base = String(releaseBase).replace(/\/+$/, "");
+  const versioned = `${base}/v${version}/${assetName}`;
+  const latest = `${base}/latest/download/${assetName}`;
+  return versioned === latest ? [versioned] : [versioned, latest];
+}
+
 async function downloadPrebuilt(plan, destination, releaseBase) {
   const base = releaseBase.replace(/\/+$/, "");
-  const url = `${base}/v${plan.version}/${plan.assetName}`;
+  const urls = releaseAssetUrls(base, plan.version, plan.assetName);
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "raw-bridge-"));
   try {
-    console.error(`downloading prebuilt bridge host: ${url}`);
-    const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
-    if (!response.ok) {
-      throw new Error(`could not download ${url} (HTTP ${response.status}); install the .NET 9 SDK and rerun with --build-from-source, pass --host-path, or publish the release asset`);
+    let response;
+    let usedUrl = "";
+    const failures = [];
+    for (const url of urls) {
+      try {
+        console.error(`downloading prebuilt bridge host: ${url}`);
+        const attempt = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
+        if (attempt.ok) {
+          response = attempt;
+          usedUrl = url;
+          break;
+        }
+        failures.push(`${url} (HTTP ${attempt.status})`);
+      } catch (error) {
+        failures.push(`${url} (${error.message})`);
+      }
     }
+    if (!response) {
+      throw new Error(
+        `could not download the prebuilt host; tried ${failures.join(", ")}. ` +
+          `Install the .NET 9 SDK and rerun with --build-from-source, pass --host-path, or publish the release asset`,
+      );
+    }
+    console.error(`using ${usedUrl}`);
     const archive = path.join(temp, plan.assetName);
     fs.writeFileSync(archive, Buffer.from(await response.arrayBuffer()));
 
     try {
-      const sumsResponse = await fetch(`${base}/v${plan.version}/SHA256SUMS.txt`, {
+      let sumsResponse = await fetch(`${base}/v${plan.version}/SHA256SUMS.txt`, {
         redirect: "follow",
         signal: AbortSignal.timeout(30_000),
       });
+      if (!sumsResponse.ok) {
+        sumsResponse = await fetch(`${base}/latest/download/SHA256SUMS.txt`, {
+          redirect: "follow",
+          signal: AbortSignal.timeout(30_000),
+        });
+      }
       if (sumsResponse.ok) {
         const expected = checksumFor(await sumsResponse.text(), plan.assetName);
         const actual = crypto.createHash("sha256").update(fs.readFileSync(archive)).digest("hex");

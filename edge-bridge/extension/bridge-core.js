@@ -75,7 +75,7 @@
   animation: none;
 }
 #raw-agent-glow::after {
-  content: "raw controlling";
+  content: attr(data-owner);
   position: fixed;
   left: 50%;
   bottom: 24px;
@@ -94,11 +94,56 @@
   0%, 100% { opacity: .55; }
   50% { opacity: .95; }
 }
+#raw-agent-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  z-index: 2147483647;
+  pointer-events: none;
+  transform: translate3d(-100px, -100px, 0);
+  transition: transform .13s cubic-bezier(.2, .85, .3, 1);
+  will-change: transform;
+}
+#raw-agent-cursor .raw-cursor-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  background: linear-gradient(160deg, #ffffff 0%, #9db6ff 45%, #5b86ff 100%);
+  clip-path: polygon(0 0, 0 78%, 24% 60%, 40% 100%, 55% 93%, 39% 55%, 72% 52%);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)) drop-shadow(0 0 6px rgba(91, 134, 255, .85));
+}
+#raw-agent-cursor .raw-cursor-ring {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(140, 175, 255, .9);
+  opacity: 0;
+}
+#raw-agent-cursor.raw-cursor-down .raw-cursor-ring {
+  animation: raw-cursor-ping .5s ease-out;
+}
+@keyframes raw-cursor-ping {
+  0% { transform: scale(.35); opacity: .95; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
 `;
 
   // Injected into the page with chrome.scripting.executeScript, so it must be
   // self-contained: no references to extension-scope helpers.
-  function agentGlowShow(id, idleMs) {
+  function agentGlowShow(id, idleMs, owner) {
+    // The driving runtime may publish its identity on the page; fall back to a
+    // generic label so a human still sees that the tab is being driven.
+    // The isolated world cannot read page variables, so the runtime's identity
+    // travels as a DOM attribute written by rawSyncOwnerAttr (MAIN world).
+    const fromAttr = document.documentElement && document.documentElement.getAttribute("data-raw-owner");
+    const label = String(fromAttr || (window.__rawOwner && window.__rawOwner.label) || owner || "").trim() || "raw controlling";
     const remove = (node) => {
       clearTimeout(node.__rawGlowTimer);
       node.classList.add("raw-glow-out");
@@ -106,6 +151,7 @@
     };
     const existing = document.getElementById(id);
     if (existing) {
+      existing.dataset.owner = label;
       existing.classList.remove("raw-glow-out");
       clearTimeout(existing.__rawGlowTimer);
       existing.__rawGlowTimer = setTimeout(() => remove(existing), idleMs);
@@ -114,8 +160,50 @@
     const node = document.createElement("div");
     node.id = id;
     node.className = "raw-glow";
+    node.dataset.owner = label;
     node.__rawGlowTimer = setTimeout(() => remove(node), idleMs);
     (document.documentElement ?? document.body).appendChild(node);
+  }
+
+  // Agent pointer: drawn where the driving agent actually dispatched a mouse
+  // event, so a human can see the path instead of a teleporting result.
+  function agentCursorShow(id, x, y, down, idleMs) {
+    let node = document.getElementById(id);
+    if (!node) {
+      node = document.createElement("div");
+      node.id = id;
+      node.innerHTML = '<div class="raw-cursor-ring"></div><div class="raw-cursor-arrow"></div>';
+      (document.documentElement ?? document.body).appendChild(node);
+    }
+    // The pointer must not outlive the agent's last action.
+    clearTimeout(node.__rawCursorTimer);
+    node.__rawCursorTimer = setTimeout(() => {
+      node.style.transition = "opacity .35s ease";
+      node.style.opacity = "0";
+      setTimeout(() => node.remove(), 400);
+    }, Number(idleMs) || 15000);
+    node.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0)";
+    if (down) {
+      node.classList.remove("raw-cursor-down");
+      void node.offsetWidth;
+      node.classList.add("raw-cursor-down");
+    }
+  }
+
+  // MAIN world: copy the runtime identity from the page variable onto the DOM,
+  // where the isolated world (and the overlay it renders) can read it.
+  function rawSyncOwnerAttr() {
+    try {
+      const o = window.__rawOwner;
+      if (o && o.label) document.documentElement.setAttribute("data-raw-owner", String(o.label));
+    } catch {
+      // pages without a documentElement
+    }
+  }
+
+  function agentCursorHide(id) {
+    const node = document.getElementById(id);
+    if (node) node.remove();
   }
 
   function agentGlowHide(id) {
@@ -203,6 +291,11 @@
           func: agentGlowHide,
           args: [AGENT_GLOW_ID],
         });
+        await chromeApi.scripting.executeScript({
+          target: { tabId },
+          func: agentCursorHide,
+          args: [CURSOR_ID],
+        });
       } catch {
         // The tab may already be gone.
       }
@@ -237,10 +330,54 @@
       return fallback;
     }
 
+    const CURSOR_ID = "raw-agent-cursor";
+    const lastCursorPaint = new Map();
+
+    /** Paint the agent's pointer where it actually dispatched a mouse event. */
+    async function paintAgentPointer(tabId, payload) {
+      if (!chromeApi.scripting?.executeScript) return;
+      if (String(payload?.method ?? "") !== "Input.dispatchMouseEvent") return;
+      const params = payload?.params ?? {};
+      if (typeof params.x !== "number" || typeof params.y !== "number") return;
+      const down = /Pressed/.test(String(params.type ?? ""));
+      const now = Date.now();
+      const last = lastCursorPaint.get(tabId) ?? 0;
+      // Moves are throttled: a drag can dispatch dozens per frame.
+      if (!down && now - last < 45) return;
+      lastCursorPaint.set(tabId, now);
+      try {
+        await chromeApi.scripting.executeScript({
+          target: { tabId },
+          func: agentCursorShow,
+          args: [CURSOR_ID, params.x, params.y, down, 60000],
+        });
+      } catch {
+        // Restricted pages cannot host the overlay.
+      }
+    }
+
+    /** Pull the runtime's identity onto the DOM, then repaint the banner. */
+    async function refreshOverlay(tabId) {
+      if (!chromeApi.scripting?.executeScript) return;
+      try {
+        await chromeApi.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: rawSyncOwnerAttr,
+          args: [],
+        });
+      } catch {
+        // Strict-CSP pages may reject MAIN-world injection; the banner then
+        // falls back to the generic label.
+      }
+      await showGlow(tabId);
+    }
+
     async function sendTabCommand(payload) {
       const tab = await tabFor(payload);
       const tabId = await ensureAttached(tab.id);
-      await showGlow(tabId);
+      await refreshOverlay(tabId);
+      await paintAgentPointer(tabId, payload);
 
       const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : 30_000;
       return await new Promise((resolve, reject) => {
@@ -257,7 +394,7 @@
             if (!settled) {
               settled = true;
               clearTimeout(timer);
-              void showGlow(tabId);
+              void refreshOverlay(tabId);
               resolve(res);
             }
           })
@@ -265,7 +402,7 @@
             if (!settled) {
               settled = true;
               clearTimeout(timer);
-              void showGlow(tabId);
+              void refreshOverlay(tabId);
               reject(err);
             }
           });

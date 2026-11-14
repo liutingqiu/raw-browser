@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { BROWSER_PROFILE as DEFAULT_BROWSER_PROFILE, DOWNLOAD_DIR as DEFAULT_DOWNLOAD_DIR } from "./paths.ts";
+
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BRIDGE_INSTALLER = path.join(PACKAGE_ROOT, "scripts", "install-edge-bridge.mjs");
 
@@ -43,7 +45,7 @@ if (args[0] && !args[0].startsWith("-")) command = args.shift()!;
 
 const rawHome = process.env.RAW_HOME || path.join(os.homedir(), ".raw");
 const browserProfileConfig = path.join(rawHome, "browser-profiles", "current.json");
-let defaultBrowserProfile = path.join(rawHome, "codex-browser-profile");
+let defaultBrowserProfile = DEFAULT_BROWSER_PROFILE;
 let defaultBrowserPath: string | undefined;
 let bridgeBrowser: "edge" | "chrome" | undefined;
 
@@ -81,7 +83,7 @@ if (bridgeBrowser) {
     process.exit(2);
   }
 }
-process.env.RAW_DOWNLOAD_DIR ??= path.join(rawHome, "codex-browser-downloads");
+process.env.RAW_DOWNLOAD_DIR ??= DEFAULT_DOWNLOAD_DIR;
 
 if (command === "help" || args.includes("-h") || args.includes("--help")) {
   process.stdout.write(HELP);
@@ -136,12 +138,12 @@ if (command === "help" || args.includes("-h") || args.includes("--help")) {
         for (let index = 0; index < result.images.length; index++) {
           const image = result.images[index];
           const extension = image.mime === "image/jpeg" ? "jpg" : "png";
-          const file = path.join(dir, `codex-raw-browser-${Date.now()}-${index + 1}.${extension}`);
+          const file = path.join(dir, `raw-browser-${Date.now()}-${index + 1}.${extension}`);
           fs.writeFileSync(file, Buffer.from(image.data, "base64"));
           process.stdout.write(`[raw-browser image] ${file}\n`);
         }
       }
-      if (result.text.startsWith("Error:")) process.exitCode = 1;
+      if (result.failed) process.exitCode = 1;
     }
   } catch (error) {
     process.stderr.write(`raw: ${error instanceof Error ? error.message : String(error)}\n`);

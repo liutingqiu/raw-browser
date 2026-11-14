@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fail when the version reported by the package, extension, native host and
- * MCP server drift apart. `--tag v0.7.0` also checks a release tag.
+ * Fail when the version reported by the package, lockfile, extension, native
+ * host and MCP server drift apart. `--tag v0.8.0` also checks a release tag.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -11,6 +11,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 
 const pkg = JSON.parse(read("package.json")).version;
+const lock = JSON.parse(read("package-lock.json")).version;
 const manifest = JSON.parse(read("edge-bridge/extension/manifest.json")).version;
 const hostMatch = /const string Version = "([^"]+)"/.exec(read("edge-bridge/host/Program.cs"));
 const mcpMatch = /serverInfo:\s*\{\s*name:\s*"raw-browser",\s*version:\s*"([^"]+)"/.exec(
@@ -22,6 +23,7 @@ if (!mcpMatch) throw new Error("could not find serverInfo.version in mcp/raw-bro
 
 const found = {
   "package.json": pkg,
+  "package-lock.json": lock,
   "edge-bridge/extension/manifest.json": manifest,
   "edge-bridge/host/Program.cs": hostMatch[1],
   "mcp/raw-browser-mcp.mjs": mcpMatch[1],
