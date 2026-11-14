@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -9,8 +11,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MCP_SCRIPT = path.join(HERE, "..", "mcp", "raw-browser-mcp.mjs");
 
 function createMcpClient() {
+  // Keep the test off the developer's real blackboard (and let Windows, where
+  // os.homedir() ignores HOME, use its own directory too).
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "raw-mcp-facade-"));
   const child = spawn(process.execPath, [MCP_SCRIPT], {
     stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, HOME: home, USERPROFILE: home, RAW_HOME: home },
   });
 
   const rl = readline.createInterface({ input: child.stdout });

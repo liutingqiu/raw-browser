@@ -21,6 +21,14 @@ import { releaseAssetUrls } from "../scripts/install-edge-bridge.mjs";
 const here = import.meta.dirname;
 const repo = path.resolve(here, "..");
 const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+const scriptDir = tmp("raw-scripts-");
+
+/** A real file avoids cmd.exe mangling inline `-e` scripts. */
+function nodeScript(name, body, extraArgs = []) {
+  const file = path.join(scriptDir, name);
+  fs.writeFileSync(file, body);
+  return ["node", JSON.stringify(file), ...extraArgs].join(" ");
+}
 
 /* ------------------------------------------------------------------ *
  * verify: timeouts must end the whole process tree, promptly
@@ -29,7 +37,7 @@ const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 test("Runner: a timed-out check with a long-lived child still resolves", async () => {
   const started = Date.now();
   const verdict = await runContract({
-    checks: [{ name: "daemon", command: 'node -e "setInterval(()=>{},1000)"', timeoutMs: 300 }],
+    checks: [{ name: "daemon", command: nodeScript("daemon.mjs", "setInterval(() => {}, 1000);"), timeoutMs: 300 }],
   });
   const elapsed = Date.now() - started;
 
@@ -43,9 +51,11 @@ test("Runner: a timed-out check does not leave a writing grandchild behind", asy
   const dir = tmp("raw-orphan-");
   const marker = path.join(dir, "survived.txt");
   // A real file keeps the quoting identical on cmd.exe and /bin/sh.
-  const scriptFile = path.join(dir, "orphan.mjs");
-  fs.writeFileSync(scriptFile, 'import fs from "node:fs"; setTimeout(() => fs.writeFileSync(process.argv[2], "x"), 1200);');
-  const command = `node ${JSON.stringify(scriptFile)} ${JSON.stringify(marker)}`;
+  const command = nodeScript(
+    "orphan.mjs",
+    'import fs from "node:fs"; setTimeout(() => fs.writeFileSync(process.argv[2], "x"), 1200);',
+    [JSON.stringify(marker)],
+  );
 
   const verdict = await runContract({ checks: [{ name: "orphan", command, timeoutMs: 300 }] });
   assert.equal(verdict.verdict, "refuted");
@@ -77,7 +87,7 @@ test("Runner: protected files pass when untouched", async (t) => {
   if (!gitAvailable()) return t.skip("git is not installed");
   const { dir } = makeRepo();
   const verdict = await runContract(
-    { checks: [{ command: 'node -e "process.exit(0)"' }], protectedFiles: ["spec.test.mjs"] },
+    { checks: [{ command: nodeScript("ok-1.mjs", "process.exit(0);") }], protectedFiles: ["spec.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "verified");
@@ -90,7 +100,7 @@ test("Runner: refutes a check when a protected test file was edited", async (t) 
   fs.appendFileSync(path.join(dir, "spec.test.mjs"), "// weakened assertion\n");
 
   const verdict = await runContract(
-    { checks: [{ command: 'node -e "process.exit(0)"' }], protectedFiles: ["spec.test.mjs"] },
+    { checks: [{ command: nodeScript("ok-1.mjs", "process.exit(0);") }], protectedFiles: ["spec.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "refuted");
@@ -104,7 +114,7 @@ test("Runner: refuses a protected file that is not tracked at HEAD", async (t) =
   fs.writeFileSync(path.join(dir, "extra.test.mjs"), "// new\n");
 
   const verdict = await runContract(
-    { checks: [{ command: 'node -e "process.exit(0)"' }], protectedFiles: ["extra.test.mjs"] },
+    { checks: [{ command: nodeScript("ok-2.mjs", "process.exit(0);") }], protectedFiles: ["extra.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "refuted");
@@ -115,7 +125,7 @@ test("Runner: reports a missing protected file", async (t) => {
   if (!gitAvailable()) return t.skip("git is not installed");
   const { dir } = makeRepo();
   const verdict = await runContract(
-    { checks: [{ command: 'node -e "process.exit(0)"' }], protectedFiles: ["nope.test.mjs"] },
+    { checks: [{ command: nodeScript("ok-3.mjs", "process.exit(0);") }], protectedFiles: ["nope.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "refuted");
@@ -194,7 +204,7 @@ fs.writeFileSync(${JSON.stringify(marker)}, "1");
 setTimeout(() => { db.exec("COMMIT"); }, Number(process.argv[3]));
 `,
   );
-  const child = spawn(process.execPath, [holder, dbPath, "1500"], { stdio: "ignore" });
+  const child = spawn(process.execPath, [holder, dbPath, "2500"], { stdio: "ignore" });
 
   try {
     const deadline = Date.now() + 10_000;
@@ -332,7 +342,7 @@ test("installer: falls back to the latest release when the version is unpublishe
 function mcpClient(home) {
   const child = spawn(process.execPath, [path.join(repo, "mcp", "raw-browser-mcp.mjs")], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, HOME: home, RAW_HOME: home },
+    env: { ...process.env, HOME: home, USERPROFILE: home, RAW_HOME: home },
   });
   const rl = readline.createInterface({ input: child.stdout });
   let id = 1;

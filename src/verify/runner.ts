@@ -149,10 +149,9 @@ function executeCheck(check: CheckSpec, cwd: string): Promise<VerificationCheckR
 
 interface ProtectedBaseline {
   file: string;
-  /** Content hash the verification compares against. */
+  /** Content hash for non-git snapshots; null when git is the source of truth. */
   hash: string | null;
-  /** True when the hash came from the committed HEAD version. */
-  fromGit: boolean;
+  git: boolean;
 }
 
 interface ProtectedSnapshot {
@@ -162,12 +161,14 @@ interface ProtectedSnapshot {
 
 function git(cwd: string, args: string[]): { status: number; stdout: Buffer } {
   try {
-    const result = spawnSync("git", args, {
-      cwd,
+    const result = spawnSync("git", ["-C", cwd, ...args], {
       maxBuffer: MAX_PROTECTED_BYTES,
       windowsHide: true,
     });
-    return { status: result.status ?? 1, stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout ?? "") };
+    return {
+      status: result.status ?? 1,
+      stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout ?? ""),
+    };
   } catch {
     return { status: 1, stdout: Buffer.alloc(0) };
   }
@@ -178,6 +179,18 @@ function repoRoot(cwd: string): string | null {
   const top = git(cwd, ["rev-parse", "--show-toplevel"]);
   const root = top.stdout.toString("utf8").trim();
   return top.status === 0 && root ? root : null;
+}
+
+/**
+ * `git status --porcelain -- <path>` is compared against HEAD. Letting git
+ * resolve the path avoids the symlinked-temp-directory and short-path problems
+ * that made a relative-path calculation report a clean file as untracked.
+ */
+function gitDirty(cwd: string, file: string): { tracked: boolean; dirty: string } {
+  const tracked = git(cwd, ["ls-files", "--error-unmatch", "--", file]).status === 0;
+  if (!tracked) return { tracked, dirty: "" };
+  const status = git(cwd, ["status", "--porcelain", "--", file]);
+  return { tracked, dirty: status.status === 0 ? status.stdout.toString("utf8").trim() : "?" };
 }
 
 /** Hash of each protected file as it is at the start of verification. */
@@ -191,21 +204,22 @@ export function snapshotProtectedFiles(cwd: string, files: string[] = []): Prote
     const abs = path.resolve(cwd, file);
     if (!fs.existsSync(abs)) {
       violation ??= `protected file is missing: ${file}`;
-      baseline.push({ file, hash: null, fromGit: false });
+      baseline.push({ file, hash: null, git: Boolean(root) });
       continue;
     }
 
     if (root) {
-      const relative = path.relative(root, abs).split(path.sep).join("/");
-      const show = git(root, ["show", `HEAD:${relative}`]);
-      if (show.status === 0) {
-        baseline.push({ file, hash: normalizedSha256(show.stdout), fromGit: true });
-        continue;
+      const state = gitDirty(cwd, file);
+      if (!state.tracked) {
+        // Tracked nowhere in HEAD: there is no trusted version to compare against.
+        violation ??= `protected file is not tracked at HEAD: ${file}`;
+      } else if (state.dirty) {
+        violation ??= `protected file was modified against HEAD: ${file}`;
       }
-      // Tracked nowhere in HEAD: there is no trusted version to compare against.
-      violation ??= `protected file is not tracked at HEAD: ${file}`;
+      baseline.push({ file, hash: null, git: true });
+      continue;
     }
-    baseline.push({ file, hash: normalizedSha256(fs.readFileSync(abs)), fromGit: false });
+    baseline.push({ file, hash: normalizedSha256(fs.readFileSync(abs)), git: false });
   }
 
   return { baseline, violation };
@@ -215,16 +229,22 @@ export function snapshotProtectedFiles(cwd: string, files: string[] = []): Prote
 export function verifyProtectedFiles(cwd: string, snapshot: ProtectedSnapshot): string | undefined {
   let violation = snapshot.violation;
   for (const entry of snapshot.baseline) {
-    if (entry.hash === null) continue;
     const abs = path.resolve(cwd, entry.file);
     if (!fs.existsSync(abs)) {
       violation ??= `protected file was deleted during verification: ${entry.file}`;
       continue;
     }
-    if (normalizedSha256(fs.readFileSync(abs)) !== entry.hash) {
-      violation ??= entry.fromGit
-        ? `protected file was modified against HEAD: ${entry.file}`
-        : `protected file changed during verification: ${entry.file}`;
+    if (entry.git) {
+      const state = gitDirty(cwd, entry.file);
+      if (!state.tracked) {
+        violation ??= `protected file is no longer tracked at HEAD: ${entry.file}`;
+      } else if (state.dirty) {
+        violation ??= `protected file changed during verification: ${entry.file}`;
+      }
+      continue;
+    }
+    if (entry.hash !== null && normalizedSha256(fs.readFileSync(abs)) !== entry.hash) {
+      violation ??= `protected file changed during verification: ${entry.file}`;
     }
   }
   return violation;

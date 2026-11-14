@@ -13,7 +13,7 @@ const MCP_SCRIPT = path.join(HERE, "..", "mcp", "raw-browser-mcp.mjs");
 function createClient(homeDir) {
   const child = spawn(process.execPath, [MCP_SCRIPT], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, HOME: homeDir },
+    env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, RAW_HOME: homeDir },
   });
   const rl = readline.createInterface({ input: child.stdout });
   let reqId = 1;
