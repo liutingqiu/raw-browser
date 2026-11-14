@@ -1,7 +1,7 @@
 {
   "name": "raw-browser",
   "version": "0.8.0",
-  "description": "Drive the Chrome or Edge you're already signed into from one script — a zero-dependency browser automation runtime, CLI and MCP server for AI agents.",
+  "description": "Drive the Chrome or Edge you're already signed into from one script \u2014 a zero-dependency browser automation runtime, CLI and MCP server for AI agents.",
   "keywords": [
     "ai",
     "ai-agents",
@@ -56,6 +56,7 @@
   "scripts": {
     "build": "node --no-warnings scripts/build.mjs",
     "typecheck": "tsc --noEmit",
+    "pretest": "node --no-warnings scripts/build.mjs",
     "check": "node scripts/check-versions.mjs && npm run typecheck && npm test && npm run build && node scripts/smoke-browser.mjs",
     "check:versions": "node scripts/check-versions.mjs",
     "prepublishOnly": "npm run check",

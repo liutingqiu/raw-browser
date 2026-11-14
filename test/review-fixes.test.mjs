@@ -23,11 +23,14 @@ const repo = path.resolve(here, "..");
 const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 const scriptDir = tmp("raw-scripts-");
 
-/** A real file avoids cmd.exe mangling inline `-e` scripts. */
-function nodeScript(name, body, extraArgs = []) {
-  const file = path.join(scriptDir, name);
-  fs.writeFileSync(file, body);
-  return ["node", JSON.stringify(file), ...extraArgs].join(" ");
+/**
+ * Write a script and return the bare file name. Contracts run with `cwd` set
+ * to the script's directory, because cmd.exe mangles both inline `-e` scripts
+ * and quoted absolute paths.
+ */
+function writeScript(dir, name, body) {
+  fs.writeFileSync(path.join(dir, name), body);
+  return `node ${name}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -36,9 +39,11 @@ function nodeScript(name, body, extraArgs = []) {
 
 test("Runner: a timed-out check with a long-lived child still resolves", async () => {
   const started = Date.now();
-  const verdict = await runContract({
-    checks: [{ name: "daemon", command: nodeScript("daemon.mjs", "setInterval(() => {}, 1000);"), timeoutMs: 300 }],
-  });
+  writeScript(scriptDir, "daemon.mjs", "setInterval(() => {}, 1000);");
+  const verdict = await runContract(
+    { checks: [{ name: "daemon", command: "node daemon.mjs", timeoutMs: 300 }] },
+    scriptDir,
+  );
   const elapsed = Date.now() - started;
 
   assert.equal(verdict.verdict, "refuted");
@@ -51,13 +56,13 @@ test("Runner: a timed-out check does not leave a writing grandchild behind", asy
   const dir = tmp("raw-orphan-");
   const marker = path.join(dir, "survived.txt");
   // A real file keeps the quoting identical on cmd.exe and /bin/sh.
-  const command = nodeScript(
+  writeScript(
+    dir,
     "orphan.mjs",
-    'import fs from "node:fs"; setTimeout(() => fs.writeFileSync(process.argv[2], "x"), 1200);',
-    [JSON.stringify(marker)],
+    `import fs from "node:fs"; setTimeout(() => fs.writeFileSync(${JSON.stringify(marker)}, "x"), 1200);`,
   );
 
-  const verdict = await runContract({ checks: [{ name: "orphan", command, timeoutMs: 300 }] });
+  const verdict = await runContract({ checks: [{ name: "orphan", command: "node orphan.mjs", timeoutMs: 300 }] }, dir);
   assert.equal(verdict.verdict, "refuted");
 
   await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -74,6 +79,7 @@ function gitAvailable() {
 
 function makeRepo() {
   const dir = tmp("raw-protected-");
+  fs.writeFileSync(path.join(dir, "ok.mjs"), "process.exit(0);");
   const run = (args) =>
     spawnSync("git", args, { cwd: dir, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
   run(["init", "-q"]);
@@ -87,7 +93,7 @@ test("Runner: protected files pass when untouched", async (t) => {
   if (!gitAvailable()) return t.skip("git is not installed");
   const { dir } = makeRepo();
   const verdict = await runContract(
-    { checks: [{ command: nodeScript("ok-1.mjs", "process.exit(0);") }], protectedFiles: ["spec.test.mjs"] },
+    { checks: [{ command: "node ok.mjs" }], protectedFiles: ["spec.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "verified");
@@ -100,7 +106,7 @@ test("Runner: refutes a check when a protected test file was edited", async (t) 
   fs.appendFileSync(path.join(dir, "spec.test.mjs"), "// weakened assertion\n");
 
   const verdict = await runContract(
-    { checks: [{ command: nodeScript("ok-1.mjs", "process.exit(0);") }], protectedFiles: ["spec.test.mjs"] },
+    { checks: [{ command: "node ok.mjs" }], protectedFiles: ["spec.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "refuted");
@@ -114,7 +120,7 @@ test("Runner: refuses a protected file that is not tracked at HEAD", async (t) =
   fs.writeFileSync(path.join(dir, "extra.test.mjs"), "// new\n");
 
   const verdict = await runContract(
-    { checks: [{ command: nodeScript("ok-2.mjs", "process.exit(0);") }], protectedFiles: ["extra.test.mjs"] },
+    { checks: [{ command: "node ok.mjs" }], protectedFiles: ["extra.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "refuted");
@@ -125,7 +131,7 @@ test("Runner: reports a missing protected file", async (t) => {
   if (!gitAvailable()) return t.skip("git is not installed");
   const { dir } = makeRepo();
   const verdict = await runContract(
-    { checks: [{ command: nodeScript("ok-3.mjs", "process.exit(0);") }], protectedFiles: ["nope.test.mjs"] },
+    { checks: [{ command: "node ok.mjs" }], protectedFiles: ["nope.test.mjs"] },
     dir,
   );
   assert.equal(verdict.verdict, "refuted");
