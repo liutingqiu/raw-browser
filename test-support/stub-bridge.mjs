@@ -28,6 +28,7 @@ switch (command) {
     const id = String(state.nextId++);
     const tab = { id, url: args[0] ?? "about:blank", title: "stub", active: false };
     state.tabs.push(tab);
+    state.lastBackground = process.env.RAW_TAB_BACKGROUND ?? null;
     save();
     print({ id, url: tab.url, title: tab.title });
     break;
@@ -48,6 +49,27 @@ switch (command) {
     print({ closed: id });
     break;
   }
+  case "text":
+    print(`stub text for tab ${String(args[0])}`);
+    break;
+  case "click":
+    print({ clicked: args[1] ?? "", tabId: String(args[0]) });
+    break;
+  case "fill":
+    print({ filled: args[1] ?? "", tabId: String(args[0]) });
+    break;
+  case "snapshot":
+    print({ snapshot: `# stub ${String(args[0])}` });
+    break;
+  case "frames":
+    print([]);
+    break;
+  case "cookies":
+    print([]);
+    break;
+  case "screenshot":
+    print({ saved: args[1] ?? "stub.png", bytes: 1 });
+    break;
   case "eval":
     print({ tabId: String(args[0]), expression: args[1] ?? "" });
     break;

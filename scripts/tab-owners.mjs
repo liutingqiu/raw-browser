@@ -164,6 +164,17 @@ export function releaseTab(label, tabId, { file = defaultRegistryPath() } = {}) 
   });
 }
 
+/** Forget a tab regardless of who owns it (used when it was closed). */
+export function forgetTab(tabId, { file = defaultRegistryPath() } = {}) {
+  const id = String(tabId);
+  return withLock(file, () => {
+    const state = readRegistry(file);
+    detachTab(state, id);
+    writeRegistry(state, file);
+    return state;
+  });
+}
+
 /** Drop every tab of one agent (used when it renames itself or shuts down). */
 export function releaseAll(label, { file = defaultRegistryPath() } = {}) {
   const owner = sanitizeLabel(label);

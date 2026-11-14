@@ -294,7 +294,7 @@ test("raw-bridge: normalizeUrl matches the browser runtime", () => {
   assert.ok(match, "raw-bridge.mjs no longer defines normalizeUrl");
   const bridgeNormalize = vm.runInNewContext(`(${match[0]})`);
 
-  for (const input of ["example.com", "https://example.com", "file:///tmp/a", "about:blank", "", "HTTP://X", "data:text/plain,hi"]) {
+  for (const input of ["example.com", "https://example.com", "file:///tmp/a", "about:blank", "", "HTTP://X", "data:text/plain,hi", "localhost:3000", "example.com:8080/x", "//cdn.example/app.js"]) {
     assert.equal(bridgeNormalize(input), normalizeUrl(input), `disagreement on ${JSON.stringify(input)}`);
   }
 });

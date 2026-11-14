@@ -226,11 +226,11 @@ PowerShell) to remove the old `host-*` directories.
 ## MCP server
 
 `npm install -g raw-browser` also installs `raw-mcp`, a stdio MCP server that
-exposes the runtime as 21 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
-`raw_claim`, `raw_release`, `raw_close`, `raw_new`, `raw_goto`, `raw_text`,
-`raw_html`, `raw_eval`, `raw_snapshot`, `raw_click`, `raw_fill`, `raw_visit`,
-`raw_screenshot`, `raw_cookies`, `raw_frames`, the `raw_call` escape hatch,
-plus the two multi-agent tools `raw_task` and `raw_term`.
+exposes the runtime as 22 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
+`raw_claim`, `raw_release`, `raw_close`, `raw_approve`, `raw_new`, `raw_goto`,
+`raw_text`, `raw_html`, `raw_eval`, `raw_snapshot`, `raw_click`, `raw_fill`,
+`raw_visit`, `raw_screenshot`, `raw_cookies`, `raw_frames`, the `raw_call`
+escape hatch, plus the two multi-agent tools `raw_task` and `raw_term`.
 
 ```json
 {
@@ -269,22 +269,39 @@ cookie reads are reviewed, and `raw_eval` / `raw_call` are blocked.
 
 ### Tab ownership
 
-Every agent claims its own tabs and cannot act on anyone else's. `raw_claim`
-opens a tab (or takes an existing one) and records which agent owns it; the
-label you pass is shown on the tab's banner and in `raw_tabs`. Tab-scoped tools
-refuse a tab owned by another label, and navigation never falls back to
-whatever tab the human is reading: `raw_goto` with no tab of your own opens a
-new one. `raw_tabs` is read-only and reports `owner` / `owned` per tab.
-`raw_release` gives a tab back, `raw_close` closes it. Ownership lives in
-`$RAW_HOME/tab-owners.json` and is shared by every agent process.
+Every agent claims its own tabs, and agent tabs always open in the background:
+the human keeps focus on whatever they were reading. `raw_claim` opens a tab
+(or takes an existing one) and records the model-chosen label, which is shown
+on the tab's banner (`data-raw-owner`) and in `raw_tabs`.
+
+Agents still cooperate: naming another agent's `tabId` lets you read or act on
+that tab (the result carries a `[note: tab ... belongs to "..."]` line), which
+is useful when one agent verifies another's work. Only implicit targeting is
+restricted to your own tabs, so nothing silently lands on someone else's page;
+`raw_goto` with no tab of your own opens a new one instead of using the
+human's. `raw_tabs` is read-only and reports `owner` / `owned` per tab.
+`raw_release` hands a tab back; `raw_close` closes it, and closing another
+agent's tab needs `force: true`. Renaming the label keeps the tabs already
+owned. Ownership lives in `$RAW_HOME/tab-owners-<browser>.json`, shared by
+every agent process. `raw_call` remains a trusted escape hatch and is not
+ownership-checked.
+
+### Origin permissions
+
+Because the bridge drives the human's logged-in profile, navigation can require
+approval. `$RAW_HOME/permissions.json` defaults to `{"defaultAccess": "allow"}`;
+set it to `"ask"` or `"deny"`, or pin an origin:
 
 ```json
-{ "label": "dsh-content", "url": "https://example.com" }
+{
+  "defaultAccess": "ask",
+  "origins": { "https://github.com": { "access": "allow" } }
+}
 ```
 
-is the `raw_claim` call that starts a working session. Renaming the label keeps
-the tabs already owned. `raw_call` remains a trusted escape hatch and is not
-ownership-checked.
+With `ask`, a navigation returns an error naming the origin; after the human
+says yes, `raw_approve { "origin": "https://example.com", "scope": "session" }`
+allows it for this process, and `scope: "persistent"` writes it to the file.
 
 ### Multi-agent tools
 

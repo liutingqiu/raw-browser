@@ -7,10 +7,17 @@ follow Semantic Versioning.
 
 ### Added
 
+- **Origin permissions**: `~/.raw/permissions.json` with `allow` / `ask` / `deny`
+  per origin, plus `raw_approve` for session or persistent approval.
+- **Verify evidence**: `raw_task verify` attaches a screenshot, URL and title of
+  the agent's tab to the verdict, and verification is no longer cut off by the
+  generic 2-minute local-tool timeout.
 - **Tab ownership** (`raw_claim`, `raw_release`, `raw_close`): each agent claims
   its own tabs and cannot act on another agent's. `raw_tabs` reports the owner
   per tab and never re-points the agent at the human's active tab; `raw_goto`
   opens a new tab when the agent has none. The label is shown on the tab banner.
+  Agent tabs open in the background so the human keeps focus; naming another
+  agent's `tabId` still works for cooperation and reports the owner.
 - **raw.mesh (Blackboard & Mailbox)**: Zero-dependency cross-agent collaboration engine
   built natively on Node 22 `node:sqlite` (WAL mode). Persistent tasks, defensive XML
   envelope packaging to prevent tag escaping, and SHA-256 content-addressed artifact storage.
