@@ -39,7 +39,15 @@ function createClient(homeDir) {
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
     });
   }
-  return { call, close: () => child.kill() };
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  return {
+    call,
+    async close() {
+      child.kill();
+      // Windows keeps the SQLite file locked until the process is really gone.
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    },
+  };
 }
 
 async function tool(client, action, params) {
@@ -100,7 +108,11 @@ test("raw.mesh mailbox: send, poll, markRead and list over MCP", async () => {
     assert.ok(Array.isArray(listed.data));
     assert.ok(listed.data.some((t) => t.task_id === created.data.task_id));
   } finally {
-    client.close();
-    fs.rmSync(home, { recursive: true, force: true });
+    await client.close();
+    try {
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // A lingering handle must not turn a passing test into a failure.
+    }
   }
 });
