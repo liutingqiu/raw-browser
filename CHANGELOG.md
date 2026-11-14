@@ -16,6 +16,10 @@ tool surface that grew from 16 to 29 tools.
 - **Verify evidence**: `raw_task verify` attaches a screenshot, URL and title of
   the agent's tab to the verdict, and verification is no longer cut off by the
   generic 2-minute local-tool timeout.
+- **Automatic tab groups**: every claimed tab joins a Chrome tab group named by
+  the model per task (`raw_claim { group }`), even a single tab, so agent tabs
+  stay visibly separate from the human's. `raw_group` regroups, ungroups or
+  closes a finished task's tabs.
 - **Tab ownership** (`raw_claim`, `raw_release`, `raw_close`, `raw_clone`): each
   agent claims its own tabs, tagged with a model-chosen label that is painted on
   the tab banner. `raw_tabs` reports the owner per tab and never re-points the

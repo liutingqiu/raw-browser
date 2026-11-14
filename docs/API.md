@@ -200,15 +200,20 @@ truncated to 24 000 characters; use `page.text(selector)` or
 
 Several agents can share one browser without fighting over tabs. Each MCP
 process is one agent, identified by a label (the name shown on the tab banner).
-Agent tabs open in the background, so the human keeps focus. Ownership is stored
+Agent tabs open in the background, so the human keeps focus, and every claimed
+tab is automatically placed in a Chrome tab group named after the task (the
+`group` parameter; default: the label), even when it is the only tab. End a
+task with `raw_group { close: true }` or `raw_close` for the tabs you no longer
+need, especially when several agents run in parallel. Ownership is stored
 in `$RAW_HOME/tab-owners-<browser>.json` and shared by every process.
 
 | Tool | Parameters | What it does |
 |---|---|---|
-| `raw_claim` | `label`, `tabId`?, `url`?, `force`? | Open a tab (or take `tabId`) and claim it; `label` renames this agent and keeps its tabs |
+| `raw_claim` | `label`, `group`?, `tabId`?, `url`?, `force`? | Open a tab (or take `tabId`) and claim it; it joins the `group` task group (default: the label) |
 | `raw_release` | `tabId`? | Give a tab back without closing it |
 | `raw_close` | `tabId`?, `force`? | Close a tab and release it; another agent's tab needs `force: true` |
 | `raw_clone` | `tabId`? | Copy a tab's URL and scroll position into a new tab this agent owns |
+| `raw_group` | `group`?, `color`?, `close`?, `ungroup`? | Regroup a task's tabs, ungroup them, or close the whole group |
 
 Target resolution:
 

@@ -256,8 +256,9 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 ### 标签页归属
 
 每个 Agent 认领自己的标签页，而且 **Agent 的标签页一律在后台新开**，不抢人类的焦点。
-`raw_claim` 新开（或接管）一个标签页并记下模型自己起的 label，横幅会显示，
-`raw_tabs` 也会返回。
+`raw_claim` 新开（或接管）一个标签页，记下模型自己起的 label，并且**自动放进一个 Chrome
+标签组**——一个任务一个组，组名由模型通过 `group` 决定（默认等于 label）。哪怕只开一个页
+也会成组，这样 Agent 的标签页和人类的一眼就能分开。
 
 Agent 之间仍然可以配合，但只能读：显式传入别人的 `tabId` 可以读取
 （`raw_text` / `raw_html` / `raw_snapshot` / `raw_screenshot` / `raw_frames`），

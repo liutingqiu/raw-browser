@@ -26,7 +26,7 @@ switch (command) {
     break;
   case "new": {
     const id = String(state.nextId++);
-    const tab = { id, url: args[0] ?? "about:blank", title: "stub", active: false };
+    const tab = { id, url: args[0] ?? "about:blank", title: "stub", active: false, windowId: 1, groupId: -1 };
     state.tabs.push(tab);
     state.lastBackground = process.env.RAW_TAB_BACKGROUND ?? null;
     save();
@@ -47,6 +47,40 @@ switch (command) {
     state.tabs = state.tabs.filter((item) => item.id !== id);
     save();
     print({ closed: id });
+    break;
+  }
+  case "call": {
+    const method = String(args[0] ?? "");
+    const params = JSON.parse(args[1] ?? "{}");
+    if (method === "Raw.groupTabs") {
+      const tabIds = (params.tabIds ?? []).map(Number);
+      let groupId = Number(params.groupId);
+      if (!Number.isInteger(groupId) || groupId <= 0) {
+        groupId = state.nextGroupId++;
+        state.groups = state.groups ?? {};
+        state.groups[groupId] = { title: params.title ?? "", color: params.color ?? "" };
+      }
+      const wanted = new Set(tabIds.map(String));
+      for (const tab of state.tabs) if (wanted.has(String(tab.id))) tab.groupId = groupId;
+      save();
+      print({ groupId });
+      break;
+    }
+    if (method === "Raw.findGroup") {
+      const title = String(params.title ?? "");
+      const match = Object.entries(state.groups ?? {}).find(([, group]) => group.title === title);
+      print({ groupId: match ? Number(match[0]) : null });
+      break;
+    }
+    if (method === "Raw.ungroupTabs") {
+      const tabIds = (params.tabIds ?? []).map(Number);
+      const wanted = new Set(tabIds.map(String));
+      for (const tab of state.tabs) if (wanted.has(String(tab.id))) tab.groupId = -1;
+      save();
+      print({ ok: true, tabIds });
+      break;
+    }
+    print({ error: `stub: unsupported call ${method}` }, 1);
     break;
   }
   case "press":

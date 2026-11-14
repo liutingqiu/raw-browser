@@ -273,8 +273,11 @@ cookie reads are reviewed, and `raw_eval` / `raw_call` are blocked.
 
 Every agent claims its own tabs, and agent tabs always open in the background:
 the human keeps focus on whatever they were reading. `raw_claim` opens a tab
-(or takes an existing one) and records the model-chosen label, which is shown
-on the tab's banner (`data-raw-owner`) and in `raw_tabs`.
+(or takes an existing one), records the model-chosen label (shown on the tab's
+banner and in `raw_tabs`) and **puts the tab in a Chrome tab group** — one group
+per task, named by the model via `group` (default: the agent label). A single
+agent tab is grouped too, so agent tabs are always distinguishable from the
+human's.
 
 Agents still cooperate, but read-only: naming another agent's `tabId` lets you
 read it (`raw_text`, `raw_html`, `raw_snapshot`, `raw_screenshot`, `raw_frames`)
@@ -286,9 +289,12 @@ targeting is restricted to your own tabs, so nothing silently lands on someone
 else's page; `raw_goto` with no tab of your own opens a new one. `raw_tabs` is
 read-only and reports `owner` / `owned` per tab. `raw_release` hands a tab
 back; `raw_close` closes it, and closing another agent's tab needs
-`force: true`. Renaming the label keeps the tabs already owned. `raw_group` puts
-this agent's tabs into one Chrome tab group titled with its label (reload the
-extension once after upgrading: it now declares the `tabGroups` permission).
+`force: true`. Renaming the label keeps the tabs already owned. `raw_group`
+regroups a task's tabs, `ungroup: true` removes the decoration, and
+`close: true` closes the whole group at the end of a task — agents should close
+tabs they no longer need as soon as a step is done, especially when several run
+in parallel. (Reload the extension once after upgrading: it now declares the
+`tabGroups` permission.)
 Ownership lives in `$RAW_HOME/tab-owners-<browser>.json`, shared by every agent
 process. `raw_call` remains a trusted escape hatch and is not
 ownership-checked.
