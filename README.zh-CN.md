@@ -212,11 +212,11 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 ## MCP server
 
 `npm install -g raw-browser` 会同时安装 `raw-mcp`，这是一个 stdio MCP server，
-把运行时暴露为 18 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
-`raw_new`、`raw_goto`、`raw_text`、`raw_html`、`raw_eval`、`raw_snapshot`、
-`raw_click`、`raw_fill`、`raw_visit`、`raw_screenshot`、`raw_cookies`、
-`raw_frames`、逃生舱 `raw_call`，以及两个多 Agent 工具 `raw_task` 和
-`raw_term`。
+把运行时暴露为 21 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
+`raw_claim`、`raw_release`、`raw_close`、`raw_new`、`raw_goto`、`raw_text`、
+`raw_html`、`raw_eval`、`raw_snapshot`、`raw_click`、`raw_fill`、`raw_visit`、
+`raw_screenshot`、`raw_cookies`、`raw_frames`、逃生舱 `raw_call`，以及两个
+多 Agent 工具 `raw_task` 和 `raw_term`。
 
 ```json
 {
@@ -251,6 +251,19 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 [HOL Guard](https://github.com/hashgraph-online/hol-guard) 的 MCP 目录中
 （`mcp.raw-browser`）：只读工具沿用默认策略，导航、输入和 Cookie 读取需要复核，
 `raw_eval` / `raw_call` 被阻止。
+
+### 标签页归属
+
+每个 Agent 只能操作自己认领的标签页。`raw_claim` 会新开一个标签页（或接管已有的），
+把归属记下来，标签页上的横幅会显示你传入的 label；别的 Agent 的标签页会被拒绝操作。
+没有自己的标签页时，`raw_goto` 会新开一个，而不是跳到你正在看的页面。
+`raw_tabs` 只读，会返回每个标签页的 `owner` / `owned`；`raw_release` 归还，
+`raw_close` 关闭。归属存在 `$RAW_HOME/tab-owners.json`，所有 Agent 进程共享。
+改 label 会保留已认领的标签页；`raw_call` 是受信任的逃生舱，不做归属校验。
+
+```json
+{ "label": "dsh-content", "url": "https://example.com" }
+```
 
 ### 多 Agent 工具
 

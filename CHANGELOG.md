@@ -7,6 +7,10 @@ follow Semantic Versioning.
 
 ### Added
 
+- **Tab ownership** (`raw_claim`, `raw_release`, `raw_close`): each agent claims
+  its own tabs and cannot act on another agent's. `raw_tabs` reports the owner
+  per tab and never re-points the agent at the human's active tab; `raw_goto`
+  opens a new tab when the agent has none. The label is shown on the tab banner.
 - **raw.mesh (Blackboard & Mailbox)**: Zero-dependency cross-agent collaboration engine
   built natively on Node 22 `node:sqlite` (WAL mode). Persistent tasks, defensive XML
   envelope packaging to prevent tag escaping, and SHA-256 content-addressed artifact storage.
