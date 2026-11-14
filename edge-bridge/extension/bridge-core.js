@@ -84,28 +84,24 @@
   position: fixed;
   left: 0;
   top: 0;
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   z-index: 2147483647;
   pointer-events: none;
-  transform: translate3d(-100px, -100px, 0);
-  transition: transform .13s cubic-bezier(.2, .85, .3, 1);
   will-change: transform;
 }
 #raw-agent-cursor .raw-cursor-arrow {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: 18px;
-  height: 18px;
-  background: linear-gradient(160deg, #ffffff 0%, #9db6ff 45%, #5b86ff 100%);
-  clip-path: polygon(0 0, 0 78%, 24% 60%, 40% 100%, 55% 93%, 39% 55%, 72% 52%);
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)) drop-shadow(0 0 6px rgba(91, 134, 255, .85));
+  inset: 0;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADvElEQVR42u1WTUgrVxT+zp07P5nJv0GoGDQhr2BdtGBLkbarFjd1oVDQUgRDV82j6ObhVihddBUaIYsuLOLG4rJFBKHd2iq4qvTRLrpoNBqxSqpObube2415+OyzmPhcvffBgblz5jLffOc7dw7wEi/xooOuLqLRKAEgpRRxzrXjOLparer7JGC0Lrq7u7kQwvJ935JSWkEQMCklcrmcrtVq98cgm82SaZomgFHTNL/v6ur6x3XdxwA+AdBrmqbDOTeu7ikWi7qF6+vWvVsjnU4zznnYsqxfRkZGxNLSkp6ZmdEAfgXwGWMsyTkP9ff309WXFYtFDQDXSbQrAD86OjKCIBjM5XJvzc/PY2hoCJOTk0ilUq+Vy+Wv9/f3La31D4eHh3uJREI87wow3/cJgBuPx+E4zpNEPp9HoVAwAXyutR71fd89OzuzWvnZ2Vl08sX/daFh2ADeHxgY0Ds7O7rRaDwVxWJR9/X1NQE8AvDgutStcnTsAcuybAAf3ESgWq3qUqmkiehPAI8YY+8xxt59SkbG3rkabRGwbft/FWhFqVTSmUympcSrjDHXtm3jzh541oH0LExMTGBubo4bhvEQwJjW2g2CwI5Go+xOBIjoVg/G43Hk83mUy+W+bDb7pdY6L6Xs9X3fiUajHSvB290wPj4OALxQKDyUUppCiG8A6Fgs5p+enrbdFUxK2daGWCyG6elplMvlvkwm8wWAj5vNZlIpxTsqQbsEWhgbG8PU1BS79MMrQggeiURYpyZsG5FIBIODgwCQAOBJKbkQgtr2AOccQohb104phXq9ju3tbSwvLwPAHwBOGWPKMIz2/wWXXXAj80ajgb29Payvr+vNzU25sbFxfnx8fKG1PgHwG4CvAOwDCDzP0+fn5+0RYIwBwI3MV1dXsbKygq2traN6vb4tpfwZwAGAPQD7jLEKgAvXdYNarda+ApdHt9JaQyn1JLG7u4uFhQW9uLj4O4CfAHwL4G8iuiCiJhEJIgrC4XDD87ygUql05mbP8ywAb6TTab22tqYbjYY+OTnRo6OjKhwO/wXgUyJ6E0AvEaUsywqHQiEXgMUY4z09PXSns5hzbhBRBMB36XT6pFAoqOHhYQHgRwAfAehnjKVCoZBj2zZPJBKE5whyHIeUUrYQ4nUAH1qW9XYQBDWl1AoRPSaiI8Mw/GQy6R8cHOh7mYpN02SGYTjNZtNWSjmXnSEYY8LzvAvLsmQnBrv1VKyU0vF4XDHGAillk3MuiMh3XVekUilZqVTudTR/sfEvJMbyeGoxdHEAAAAASUVORK5CYII=");
+  background-size: 32px 32px;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45));
 }
 #raw-agent-cursor .raw-cursor-ring {
   position: absolute;
-  left: 2px;
-  top: 2px;
+  left: -5px;
+  top: 1px;
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -309,29 +305,129 @@
     api.touch();
   }
 
-  // Agent pointer: drawn where the driving agent actually dispatched a mouse
-  // event, so a human can see the path instead of a teleporting result.
-  function agentCursorShow(id, x, y, down, idleMs) {
-    let node = document.getElementById(id);
-    if (!node) {
-      node = document.createElement("div");
+  // Agent pointer, in two layers:
+  //   * positioning is owned by this one component, so every later mouse event
+  //     continues from wherever the pointer currently sits;
+  //   * motion is a short ease-out tween (quick off the mark, settling slowly)
+  //     instead of a teleport, and the pointer stays on screen afterwards until
+  //     the tab is detached or navigates.
+  function agentCursorShow(id, x, y, down) {
+    // Injected standalone: everything it needs must live inside this function.
+    // Hotspot of icons/pointer.png is (3, 9), hence the offsets below.
+    const CURSOR_HOT_X = 3;
+    const CURSOR_HOT_Y = 9;
+    const KEY = "__rawCursorState";
+    const FLOAT_RADIUS = 150; // px: idle drift never leaves this disc
+    let state = window[KEY];
+
+    if (!state || !state.node || !state.node.isConnected) {
+      const node = document.createElement("div");
       node.id = id;
-      node.innerHTML = '<div class="raw-cursor-ring"></div><div class="raw-cursor-arrow"></div>';
-      (document.documentElement ?? document.body).appendChild(node);
+      node.innerHTML = '<div class="raw-cursor-arrow"></div><div class="raw-cursor-ring"></div>';
+      (document.documentElement || document.body).appendChild(node);
+      node.style.transform = "translate3d(" + (x - CURSOR_HOT_X) + "px," + (y - CURSOR_HOT_Y) + "px,0)";
+      state = {
+        node, x, y, tx: x, ty: y, fromX: x, fromY: y, start: 0, duration: 0,
+        raf: 0, floatRaf: 0, anchorX: x, anchorY: y, floatStart: 0, p1: 0, p2: 0, p3: 0, p4: 0,
+      };
+      window[KEY] = state;
     }
-    // The pointer must not outlive the agent's last action.
-    clearTimeout(node.__rawCursorTimer);
-    node.__rawCursorTimer = setTimeout(() => {
-      node.style.transition = "opacity .35s ease";
-      node.style.opacity = "0";
-      setTimeout(() => node.remove(), 400);
-    }, Number(idleMs) || 15000);
-    node.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0)";
-    if (down) {
-      node.classList.remove("raw-cursor-down");
-      void node.offsetWidth;
-      node.classList.add("raw-cursor-down");
+
+    // Any real input ends the idle drift and the pointer continues from where
+    // the drift left it, so there is no visible snap.
+    if (state.floatRaf) {
+      cancelAnimationFrame(state.floatRaf);
+      state.floatRaf = 0;
+      // state.x/state.y already hold the drifted position, so the glide starts
+      // exactly where the pointer is on screen
     }
+
+    state.tx = x;
+    state.ty = y;
+
+    if (down && state.node) {
+      state.node.classList.remove("raw-cursor-down");
+      void state.node.offsetWidth;
+      state.node.classList.add("raw-cursor-down");
+    }
+
+    // Idle drift: a continuous, organic wander inside a disc around the point
+    // the pointer last rested at. Two superposed rotations with unrelated
+    // periods give a slow figure-eight-ish path that never parks, so the
+    // pointer keeps moving instead of hopping to a random target and waiting.
+    const FLOAT_A = FLOAT_RADIUS * 0.55;
+    const FLOAT_B = FLOAT_RADIUS * 0.45; // A + B <= FLOAT_RADIUS
+    const startFloat = () => {
+      state.anchorX = state.x;
+      state.anchorY = state.y;
+      state.floatStart = performance.now();
+      state.p1 = Math.random() * Math.PI * 2;
+      state.p2 = Math.random() * Math.PI * 2;
+      state.p3 = Math.random() * Math.PI * 2;
+      state.p4 = Math.random() * Math.PI * 2;
+      const tick = () => {
+        const t = performance.now() - state.floatStart;
+        const px = state.anchorX +
+          FLOAT_A * Math.sin(t * 0.00091 + state.p1) +
+          FLOAT_B * Math.sin(t * 0.00052 + state.p2);
+        const py = state.anchorY +
+          FLOAT_A * Math.cos(t * 0.00077 + state.p3) +
+          FLOAT_B * Math.cos(t * 0.00049 + state.p4);
+        let dx = px - state.anchorX;
+        let dy = py - state.anchorY;
+        const len = Math.hypot(dx, dy);
+        if (len > FLOAT_RADIUS) {
+          dx = (dx / len) * FLOAT_RADIUS;
+          dy = (dy / len) * FLOAT_RADIUS;
+        }
+        state.x = state.anchorX + dx;
+        state.y = state.anchorY + dy;
+        state.node.style.transform =
+          "translate3d(" + (state.x - CURSOR_HOT_X) + "px," + (state.y - CURSOR_HOT_Y) + "px,0)";
+        state.floatRaf = requestAnimationFrame(tick);
+      };
+      state.floatRaf = requestAnimationFrame(tick);
+    };
+
+    if (state.raf) return;
+    const dist = Math.hypot(state.tx - state.x, state.ty - state.y);
+    if (dist < 0.5) {
+      if (!state.floatRaf) startFloat();
+      return;
+    }
+
+    state.fromX = state.x;
+    state.fromY = state.y;
+    state.start = performance.now();
+    // short moves snap quickly; long jumps take a little longer but stay under
+    // 700ms so the pointer never lags behind the action it belongs to
+    state.duration = Math.max(150, Math.min(700, 130 + dist * 0.9));
+
+    const step = (now) => {
+      const t = Math.min(1, (now - state.start) / state.duration);
+      // ease-out cubic: almost all of the distance in the first half
+      const eased = 1 - Math.pow(1 - t, 3);
+      state.x = state.fromX + (state.tx - state.fromX) * eased;
+      state.y = state.fromY + (state.ty - state.fromY) * eased;
+      state.node.style.transform =
+        "translate3d(" + (state.x - CURSOR_HOT_X) + "px," + (state.y - CURSOR_HOT_Y) + "px,0)";
+      if (t < 1) {
+        state.raf = requestAnimationFrame(step);
+        return;
+      }
+      state.raf = 0;
+      // a newer target may have arrived mid-flight: pick it up seamlessly
+      if (Math.abs(state.tx - state.x) > 0.5 || Math.abs(state.ty - state.y) > 0.5) {
+        state.fromX = state.x;
+        state.fromY = state.y;
+        state.start = performance.now();
+        state.duration = Math.max(150, Math.min(700, 130 + Math.hypot(state.tx - state.x, state.ty - state.y) * 0.9));
+        state.raf = requestAnimationFrame(step);
+        return;
+      }
+      startFloat();
+    };
+    state.raf = requestAnimationFrame(step);
   }
 
   // MAIN world: copy the runtime identity from the page variable onto the DOM,
@@ -346,6 +442,13 @@
   }
 
   function agentCursorHide(id) {
+    const KEY = "__rawCursorState";
+    const state = window[KEY];
+    if (state) {
+      if (state.raf) cancelAnimationFrame(state.raf);
+      if (state.floatRaf) cancelAnimationFrame(state.floatRaf);
+      if (window[KEY] === state) delete window[KEY];
+    }
     const node = document.getElementById(id);
     if (node) node.remove();
   }
@@ -495,7 +598,7 @@
         await chromeApi.scripting.executeScript({
           target: { tabId },
           func: agentCursorShow,
-          args: [CURSOR_ID, params.x, params.y, down, 60000],
+          args: [CURSOR_ID, params.x, params.y, down],
         });
       } catch {
         // Restricted pages cannot host the overlay.
