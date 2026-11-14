@@ -23,6 +23,7 @@
       discarded: tab.discarded === true,
       status: tab.status ?? "complete",
       windowId: tab.windowId,
+      groupId: Number.isInteger(tab.groupId) ? tab.groupId : -1,
       favIconUrl: tab.favIconUrl ?? "",
     };
   }
@@ -881,10 +882,19 @@
           if (!details.url || !details.name) throw new Error("Raw.cookiesRemove needs { url, name }");
           return await chromeApi.cookies.remove(details);
         }
+        case "Raw.findGroup": {
+          const title = String(params.title ?? "");
+          if (!title) throw new Error("Raw.findGroup needs title");
+          const windowId = Number.isInteger(params.windowId) ? params.windowId : undefined;
+          const groups = await chromeApi.tabGroups.query({ title });
+          const match = groups.find((group) => windowId === undefined || group.windowId === windowId);
+          return { groupId: match ? match.id : null };
+        }
         case "Raw.groupTabs": {
           const tabIds = (Array.isArray(params.tabIds) ? params.tabIds : []).map((id) => tabIdFrom(id));
           if (tabIds.length === 0) throw new Error("Raw.groupTabs needs tabIds");
-          const groupId = await chromeApi.tabs.group({ tabIds });
+          const existing = Number.isInteger(params.groupId) && params.groupId > 0 ? params.groupId : undefined;
+          const groupId = await chromeApi.tabs.group(existing ? { tabIds, groupId: existing } : { tabIds });
           const update = {};
           if (params.title !== undefined) update.title = String(params.title);
           if (params.color !== undefined) update.color = String(params.color);

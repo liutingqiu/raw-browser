@@ -31,13 +31,14 @@ export function sanitizeLabel(raw, fallback = "agent") {
 }
 
 function emptyState() {
-  return { version: VERSION, owners: {}, tabs: {} };
+  return { version: VERSION, owners: {}, tabs: {}, groups: {} };
 }
 
 function normalizeState(raw) {
   if (!raw || typeof raw !== "object") return emptyState();
   const owners = raw.owners && typeof raw.owners === "object" ? raw.owners : {};
   const tabs = raw.tabs && typeof raw.tabs === "object" ? raw.tabs : {};
+  const groups = raw.groups && typeof raw.groups === "object" ? raw.groups : {};
   const cleanOwners = {};
   for (const [label, entry] of Object.entries(owners)) {
     if (!entry || typeof entry !== "object") continue;
@@ -54,7 +55,11 @@ function normalizeState(raw) {
       cleanTabs[tabId] = owner;
     }
   }
-  return { version: VERSION, owners: cleanOwners, tabs: cleanTabs };
+  const cleanGroups = {};
+  for (const [tabId, group] of Object.entries(groups)) {
+    if (typeof tabId === "string" && typeof group === "string" && cleanTabs[tabId]) cleanGroups[tabId] = group;
+  }
+  return { version: VERSION, owners: cleanOwners, tabs: cleanTabs, groups: cleanGroups };
 }
 
 export function readRegistry(file = defaultRegistryPath()) {
@@ -116,6 +121,7 @@ function withLock(file, fn) {
 function detachTab(state, tabId) {
   const owner = state.tabs[tabId];
   delete state.tabs[tabId];
+  delete state.groups[tabId];
   if (!owner) return;
   const entry = state.owners[owner];
   if (!entry) return;
@@ -223,6 +229,24 @@ export function pruneRegistry(validTabIds, { file = defaultRegistryPath() } = {}
     if (changed) writeRegistry(state, file);
     return state;
   });
+}
+
+/** Remember the task group a tab belongs to (set by the MCP layer). */
+export function setTabGroup(tabId, group, { file = defaultRegistryPath() } = {}) {
+  const id = String(tabId);
+  const name = String(group ?? "").trim();
+  return withLock(file, () => {
+    const state = readRegistry(file);
+    if (!state.tabs[id]) return state;
+    if (name) state.groups[id] = name;
+    else delete state.groups[id];
+    writeRegistry(state, file);
+    return state;
+  });
+}
+
+export function groupOf(tabId, { file = defaultRegistryPath() } = {}) {
+  return readRegistry(file).groups[String(tabId)] ?? null;
 }
 
 export function ownerOf(tabId, { file = defaultRegistryPath() } = {}) {

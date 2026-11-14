@@ -20,6 +20,8 @@ import {
   claimTab,
   defaultRegistryPath,
   forgetTab,
+  groupOf,
+  setTabGroup,
   ownedTabIds,
   ownerOf,
   pruneRegistry,
@@ -158,17 +160,19 @@ const tools = [
   },
   {
     name: "raw_tabs",
-    description: "List open tabs with id, active flag, title and URL. Remembers the active tab.",
+    description:
+      "List open tabs with id, active flag, title, URL, owner and agent group. Read-only: it never changes the current tab.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "raw_claim",
     description:
-      "Claim a tab for this agent (opens one unless tabId is given). The label is shown on the tab banner and in raw_tabs; other agents cannot act on a claimed tab.",
+      "Claim a tab for this agent (opens one unless tabId is given). The tab joins the agent's Chrome tab group, named by the model (group, default label). The label is shown on the banner; other agents can only read the tab.",
     inputSchema: {
       type: "object",
       properties: {
         label: { type: "string", description: "Agent name shown on the tab (max 32 chars)" },
+        group: { type: "string", description: "Tab-group name for this task (default: the label)" },
         tabId: { type: "string", description: "Existing tab to claim instead of opening one" },
         url: { type: "string", description: "URL for the new tab (default about:blank)" },
         force: { type: "boolean", description: "Take a tab controlled by another label" },
@@ -201,7 +205,8 @@ const tools = [
   },
   {
     name: "raw_close",
-    description: "Close a tab and release it from its owner. Closing another agent's tab needs force.",
+    description:
+      "Close a tab and release it. Close tabs you no longer need as soon as a step is done; raw_group with close:true cleans up a whole task group. Closing another agent's tab needs force.",
     inputSchema: {
       type: "object",
       properties: {
@@ -213,10 +218,14 @@ const tools = [
   },
   {
     name: "raw_new",
-    description: "Open a new tab at a URL, wait for it to load, and claim it for this agent.",
+    description:
+      "Open a new tab at a URL, wait for it to load, claim it and add it to this agent's task group.",
     inputSchema: {
       type: "object",
-      properties: { url: { type: "string", description: "URL to open" } },
+      properties: {
+        url: { type: "string", description: "URL to open" },
+        group: { type: "string", description: "Task group to join (default: the current group)" },
+      },
       required: ["url"],
       additionalProperties: false,
     },
@@ -376,13 +385,15 @@ const tools = [
   },
   {
     name: "raw_group",
-    description: "Put this agent's tabs into one Chrome tab group titled with its label.",
+    description:
+      "Manage this agent's tab group: regroup its tabs under a task name, ungroup them, or close the whole group when the task is done.",
     inputSchema: {
       type: "object",
       properties: {
-        label: { type: "string", description: "Group title (default: this agent's label)" },
+        group: { type: "string", description: "Task-group name (default: the current group)" },
         color: { type: "string", description: "blue, green, red, yellow, purple, cyan, orange, pink or grey" },
-        group: { type: "boolean", description: "false = ungroup" },
+        close: { type: "boolean", description: "Close every tab in the group and release them" },
+        ungroup: { type: "boolean", description: "Remove the tab group decoration but keep the tabs" },
       },
       additionalProperties: false,
     },
@@ -558,6 +569,8 @@ function registryFile() {
 }
 const DEFAULT_OWNER = sanitizeLabel(process.env.RAW_OWNER_LABEL || "agent");
 let ownerLabel = process.env.RAW_OWNER_LABEL ? sanitizeLabel(process.env.RAW_OWNER_LABEL) : "";
+/** The task group new tabs join; the model can name one per task. */
+let currentGroup = process.env.RAW_TAB_GROUP ? sanitizeLabel(process.env.RAW_TAB_GROUP) : "";
 
 function ensureOwner() {
   if (!ownerLabel) ownerLabel = DEFAULT_OWNER;
@@ -734,8 +747,49 @@ async function stampOwner(tabId, label, requestId) {
   await runRaw(["eval", String(tabId), expression], 15_000, requestId).catch(() => {});
 }
 
-/** Open a fresh tab and claim it, so a new agent never borrows the human's tab. */
-async function openClaimedTab(url, requestId) {
+/**
+ * Every agent tab lives in a Chrome tab group, so the human can tell agent tabs
+ * from their own at a glance. The group name is chosen by the model (default:
+ * the agent label); tabs of one group share one group id.
+ */
+async function ensureGrouped(tabId, groupName, requestId) {
+  const name = sanitizeLabel(groupName || ownerLabel || DEFAULT_OWNER);
+  const list = await runRaw(["tabs"], DEFAULT_TIMEOUT, requestId);
+  if (!list.ok || !Array.isArray(list.value)) {
+    return { grouped: false, group: name, reason: "tabs unavailable" };
+  }
+  const tabs = list.value;
+  const tab = tabs.find((item) => String(item.id) === String(tabId));
+  if (!tab) return { grouped: false, group: name, reason: "tab not found" };
+  const existing = Number(tab.groupId);
+  if (Number.isInteger(existing) && existing > 0) {
+    setTabGroup(tabId, name, { file: registryFile() });
+    return { grouped: true, group: name, groupId: existing };
+  }
+  // Ask the extension for a group with this task name in the same window, so a
+  // second tab joins it instead of starting a new group.
+  let groupId = null;
+  if (Number.isFinite(Number(tab.windowId))) {
+    const found = await runRaw(
+      ["call", "Raw.findGroup", JSON.stringify({ title: name, windowId: Number(tab.windowId) })],
+      DEFAULT_TIMEOUT,
+      requestId,
+    );
+    if (found.ok && Number(found.value?.groupId) > 0) groupId = Number(found.value.groupId);
+  }
+  const payload = groupId
+    ? { tabIds: [Number(tabId)], groupId }
+    : { tabIds: [Number(tabId)], title: name, color: groupColor(name) };
+  const grouped = await runRaw(["call", "Raw.groupTabs", JSON.stringify(payload)], DEFAULT_TIMEOUT, requestId);
+  if (!grouped.ok) {
+    return { grouped: false, group: name, reason: asText(grouped.value ?? grouped.text).slice(0, 200) };
+  }
+  setTabGroup(tabId, name, { file: registryFile() });
+  return { grouped: true, group: name, groupId: grouped.value?.groupId ?? null };
+}
+
+/** Open a fresh tab, claim it and put it in the agent's task group. */
+async function openClaimedTab(url, requestId, groupName) {
   const label = ensureOwner();
   const result = await runRaw(["new", String(url ?? "about:blank")], DEFAULT_TIMEOUT, requestId);
   if (!succeeded(result)) return { error: asText(result.value ?? result.text) };
@@ -744,8 +798,9 @@ async function openClaimedTab(url, requestId) {
   if (!tabId) return { error: asText(result.value ?? result.text) };
   claimTab(label, tabId, { file: registryFile() });
   currentTabId = tabId;
+  const group = await ensureGrouped(tabId, groupName || currentGroup || label, requestId);
   await stampOwner(tabId, label, requestId);
-  return { tabId, label };
+  return { tabId, label, group };
 }
 
 async function callTool(name, args = {}, requestId) {
@@ -763,7 +818,9 @@ async function callTool(name, args = {}, requestId) {
       const owned = ownedTabs();
       const owner = ownerLabel || "(none — call raw_claim)";
       return {
-        text: `${result.text}\nowner: ${owner}\nowned tabs: ${owned.length ? owned.join(", ") : "none"}`,
+        text:
+          `${result.text}\nowner: ${owner}\ngroup: ${currentGroup || "(none)"}\n` +
+          `owned tabs: ${owned.length ? owned.join(", ") : "none"}`,
         isError: !result.ok,
       };
     }
@@ -779,7 +836,7 @@ async function callTool(name, args = {}, requestId) {
       const annotated = result.value.map((tab) => {
         const id = String(tab.id);
         const owner = state.tabs[id] ?? null;
-        return { ...tab, owner, owned: Boolean(label) && owner === label };
+        return { ...tab, owner, owned: Boolean(label) && owner === label, group: state.groups[id] ?? null };
       });
       // Listing tabs is read-only: keep working on the tab we already own.
       const owned = annotated.filter((tab) => tab.owned).map((tab) => String(tab.id));
@@ -792,10 +849,14 @@ async function callTool(name, args = {}, requestId) {
       } catch (error) {
         return { text: error.message, isError: true };
       }
-      const opened = await openClaimedTab(args.url, requestId);
+      const opened = await openClaimedTab(args.url, requestId, args.group ? String(args.group) : currentGroup);
       if (opened.error) return { text: opened.error, isError: true };
       return {
-        text: JSON.stringify({ tabId: opened.tabId, label: opened.label, ownedTabs: ownedTabs() }, null, 2),
+        text: JSON.stringify(
+          { tabId: opened.tabId, label: opened.label, group: opened.group, ownedTabs: ownedTabs() },
+          null,
+          2,
+        ),
         isError: false,
       };
     }
@@ -819,10 +880,14 @@ async function callTool(name, args = {}, requestId) {
       }
       if (!tabId) {
         // No tab of our own yet: open one instead of navigating the human's.
-        const opened = await openClaimedTab(url, requestId);
+        const opened = await openClaimedTab(url, requestId, currentGroup);
         if (opened.error) return { text: opened.error, isError: true };
         return {
-          text: JSON.stringify({ tabId: opened.tabId, url, label: opened.label, ownedTabs: ownedTabs() }, null, 2),
+          text: JSON.stringify(
+            { tabId: opened.tabId, url, label: opened.label, group: opened.group, ownedTabs: ownedTabs() },
+            null,
+            2,
+          ),
           isError: false,
         };
       }
@@ -838,12 +903,15 @@ async function callTool(name, args = {}, requestId) {
     }
     case "raw_claim": {
       const label = sanitizeLabel(args.label ?? ownerLabel ?? DEFAULT_OWNER);
+      const groupName = sanitizeLabel(args.group ?? label);
       if (ownerLabel && label !== ownerLabel) {
         // Renaming keeps the tabs this agent already owns.
         renameOwner(ownerLabel, label, { file: registryFile() });
       }
       ownerLabel = label;
+      currentGroup = groupName;
       let tabId;
+      let group;
       if (args.tabId !== undefined && args.tabId !== null && args.tabId !== "") {
         tabId = String(args.tabId);
         try {
@@ -851,20 +919,26 @@ async function callTool(name, args = {}, requestId) {
         } catch (error) {
           return { text: `${error.message}; pass "force": true to take it over`, isError: true };
         }
+        group = await ensureGrouped(tabId, groupName, requestId);
       } else {
         try {
           checkOrigin(args.url ?? "about:blank");
         } catch (error) {
           return { text: error.message, isError: true };
         }
-        const opened = await openClaimedTab(args.url, requestId);
+        const opened = await openClaimedTab(args.url, requestId, groupName);
         if (opened.error) return { text: opened.error, isError: true };
         tabId = opened.tabId;
+        group = opened.group;
       }
       currentTabId = tabId;
       await stampOwner(tabId, label, requestId);
       return {
-        text: JSON.stringify({ label, tabId, ownedTabs: ownedTabIds(label, { file: registryFile() }) }, null, 2),
+        text: JSON.stringify(
+          { label, tabId, group, ownedTabs: ownedTabIds(label, { file: registryFile() }) },
+          null,
+          2,
+        ),
         isError: false,
       };
     }
@@ -1064,7 +1138,7 @@ async function callTool(name, args = {}, requestId) {
       } catch (error) {
         return { text: error.message, isError: true };
       }
-      const opened = await openClaimedTab(url, requestId);
+      const opened = await openClaimedTab(url, requestId, currentGroup);
       if (opened.error) return { text: opened.error, isError: true };
       if (scroll && (Number(scroll.scrollX) || Number(scroll.scrollY))) {
         await runRaw(
@@ -1075,7 +1149,7 @@ async function callTool(name, args = {}, requestId) {
       }
       return {
         text: JSON.stringify(
-          { sourceTabId: sourceId, tabId: opened.tabId, label: opened.label, url, ownedTabs: ownedTabs() },
+          { sourceTabId: sourceId, tabId: opened.tabId, label: opened.label, group: opened.group, url, ownedTabs: ownedTabs() },
           null,
           2,
         ),
@@ -1083,24 +1157,80 @@ async function callTool(name, args = {}, requestId) {
       };
     }
     case "raw_group": {
+      const label = ensureOwner();
+      const groupName = sanitizeLabel(args.group ?? currentGroup ?? label);
       const owned = ownedTabs();
-      if (owned.length === 0) return { text: "you have no claimed tabs to group", isError: true };
-      const ungroup = args.group === false;
-      const payload = ungroup
-        ? { tabIds: owned.map((id) => Number(id)) }
-        : {
-            tabIds: owned.map((id) => Number(id)),
-            title: String(args.label || ownerLabel || DEFAULT_OWNER),
-            color: String(args.color || groupColor(ownerLabel || DEFAULT_OWNER)),
-          };
-      const result = await runRaw(
-        ["call", ungroup ? "Raw.ungroupTabs" : "Raw.groupTabs", JSON.stringify(payload)],
+      const inGroup = owned.filter(
+        (id) => (groupOf(id, { file: registryFile() }) ?? label) === groupName,
+      );
+
+      if (args.close === true) {
+        if (inGroup.length === 0) return { text: `no tabs in group "${groupName}"`, isError: true };
+        const closed = [];
+        for (const id of inGroup) {
+          await runRaw(["close", id], DEFAULT_TIMEOUT, requestId);
+          forgetTab(id, { file: registryFile() });
+          closed.push(id);
+        }
+        if (closed.includes(currentTabId)) currentTabId = ownedTabs()[0] ?? null;
+        return {
+          text: JSON.stringify({ closed, group: groupName, ownedTabs: ownedTabs() }, null, 2),
+          isError: false,
+        };
+      }
+
+      const targets = args.group ? inGroup : owned;
+      if (targets.length === 0) return { text: "you have no claimed tabs to group", isError: true };
+
+      if (args.ungroup === true) {
+        const result = await runRaw(
+          ["call", "Raw.ungroupTabs", JSON.stringify({ tabIds: targets.map((id) => Number(id)) })],
+          DEFAULT_TIMEOUT,
+          requestId,
+        );
+        if (!result.ok) return { text: asText(result.value ?? result.text), isError: true };
+        for (const id of targets) setTabGroup(id, "", { file: registryFile() });
+        return { text: JSON.stringify({ ungrouped: targets, group: groupName }, null, 2), isError: false };
+      }
+
+      const list = await runRaw(["tabs"], DEFAULT_TIMEOUT, requestId);
+      const firstTab = Array.isArray(list.value)
+        ? list.value.find((tab) => String(tab.id) === String(targets[0]))
+        : undefined;
+      const found = await runRaw(
+        ["call", "Raw.findGroup", JSON.stringify({ title: groupName, windowId: firstTab?.windowId })],
         DEFAULT_TIMEOUT,
         requestId,
       );
-      if (!result.ok) return { text: asText(result.value ?? result.text), isError: true };
+      const existingGroupId =
+        found.ok && Number(found.value?.groupId) > 0 ? Number(found.value.groupId) : undefined;
+      const payload = existingGroupId
+        ? { tabIds: targets.map((id) => Number(id)), groupId: existingGroupId }
+        : {
+            tabIds: targets.map((id) => Number(id)),
+            title: groupName,
+            color: String(args.color || groupColor(groupName)),
+          };
+      const result = await runRaw(["call", "Raw.groupTabs", JSON.stringify(payload)], DEFAULT_TIMEOUT, requestId);
+      if (!result.ok) {
+        return {
+          text: `${asText(result.value ?? result.text)}\n(the extension needs a reload to support tab groups)`,
+          isError: true,
+        };
+      }
+      for (const id of targets) setTabGroup(id, groupName, { file: registryFile() });
+      currentGroup = groupName;
       return {
-        text: JSON.stringify({ grouped: !ungroup, tabs: owned, ...(result.value ?? {}) }, null, 2),
+        text: JSON.stringify(
+          {
+            grouped: true,
+            group: groupName,
+            tabs: targets,
+            groupId: result.value?.groupId ?? existingGroupId ?? null,
+          },
+          null,
+          2,
+        ),
         isError: false,
       };
     }

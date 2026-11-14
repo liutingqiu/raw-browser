@@ -175,6 +175,7 @@ app.MapGet("/json/list", async (HttpContext context) =>
             ["discarded"] = tab["discarded"]?.DeepClone(),
             ["status"] = tab["status"]?.DeepClone(),
             ["windowId"] = tab["windowId"]?.DeepClone(),
+            ["groupId"] = tab["groupId"]?.DeepClone(),
             ["faviconUrl"] = tab["favIconUrl"]?.DeepClone(),
             ["devtoolsFrontendUrl"] = "",
             ["webSocketDebuggerUrl"] = $"ws://127.0.0.1:{port}/devtools/page/{id}?token={Uri.EscapeDataString(token!)}",

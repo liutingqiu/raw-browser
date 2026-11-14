@@ -19,7 +19,8 @@ function makeWorld(permissions) {
     stateFile,
     JSON.stringify({
       nextId: 1,
-      tabs: [{ id: "999", url: "https://human.example/", title: "human tab", active: true }],
+      nextGroupId: 100,
+      tabs: [{ id: "999", url: "https://human.example/", title: "human tab", active: true, windowId: 1, groupId: -1 }],
     }),
   );
   const env = {};
@@ -342,6 +343,42 @@ test("MCP raw_task: an unknown task says so", async () => {
     const got = await a.tool("raw_task", { action: "get", params: { taskId: "task-nope" } });
     assert.equal(got.isError, true);
     assert.match(got.text, /task not found/);
+  } finally {
+    a.close();
+  }
+});
+
+
+test("TabOwnership: every claimed tab joins a model-named task group", async () => {
+  const world = makeWorld();
+  const a = await boot(world);
+  try {
+    const first = await a.tool("raw_claim", { label: "alpha", group: "task-1", url: "https://a.example/" });
+    assert.equal(first.isError, false, first.text);
+    assert.equal(first.data.group.grouped, true);
+    const groupId = first.data.group.groupId;
+    assert.ok(groupId > 0);
+
+    const second = await a.tool("raw_new", { url: "https://b.example/" });
+    assert.equal(second.data.group.groupId, groupId, "the second tab joins the same group");
+
+    let tabs = await a.tool("raw_tabs");
+    assert.equal(tabs.data.find((tab) => tab.id === first.data.tabId).group, "task-1");
+    assert.equal(tabs.data.find((tab) => tab.id === second.data.tabId).group, "task-1");
+
+    // A different task gets its own group.
+    const other = await a.tool("raw_claim", { label: "alpha", group: "task-2", url: "https://c.example/" });
+    assert.notEqual(other.data.group.groupId, groupId);
+    tabs = await a.tool("raw_tabs");
+    assert.equal(tabs.data.find((tab) => tab.id === other.data.tabId).group, "task-2");
+
+    // Closing a finished task group removes its tabs only.
+    const closed = await a.tool("raw_group", { group: "task-1", close: true });
+    assert.equal(closed.isError, false, closed.text);
+    assert.equal(closed.data.closed.length, 2);
+    const after = await a.tool("raw_tabs");
+    assert.ok(!after.data.some((tab) => tab.id === first.data.tabId));
+    assert.ok(after.data.some((tab) => tab.id === other.data.tabId));
   } finally {
     a.close();
   }
