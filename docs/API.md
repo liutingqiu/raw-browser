@@ -208,11 +208,16 @@ in `$RAW_HOME/tab-owners-<browser>.json` and shared by every process.
 | `raw_claim` | `label`, `tabId`?, `url`?, `force`? | Open a tab (or take `tabId`) and claim it; `label` renames this agent and keeps its tabs |
 | `raw_release` | `tabId`? | Give a tab back without closing it |
 | `raw_close` | `tabId`?, `force`? | Close a tab and release it; another agent's tab needs `force: true` |
+| `raw_clone` | `tabId`? | Copy a tab's URL and scroll position into a new tab this agent owns |
 
 Target resolution:
 
-1. an explicit `tabId` is always honoured — agents cooperate, and the result
-   carries a `[note: tab ... belongs to "..."]` line when it is someone else's;
+1. an explicit `tabId` is honoured — agents cooperate by reading it, and the
+   result carries a `[note: tab ... belongs to "..."]` line when it is someone
+   else's. Read tools (`raw_text`, `raw_html`, `raw_snapshot`, `raw_screenshot`,
+   `raw_frames`) work on any tab; anything that can change the page
+   (`click`, `fill`, `press`, `select`, `scroll`, `eval`, `goto`) is refused on
+   a foreign tab and points at `raw_clone`;
 2. otherwise the agent's current tab, or its first owned tab;
 3. otherwise `raw_goto` opens a new tab rather than touching the human's active
    tab, and other tools return "you have no claimed tab".
@@ -220,6 +225,22 @@ Target resolution:
 `raw_tabs` is read-only: it annotates each tab with `owner` and `owned` and
 never changes the current target. `raw_call` is a trusted escape hatch and is
 not ownership-checked, so agents should not use it to reach foreign tabs.
+
+### Additional browser tools
+
+| Tool | Parameters | What it does |
+|---|---|---|
+| `raw_press` | `key`, `tabId`? | `Enter`, `Tab`, `Escape`, arrows, letters, or a chord like `Control+a` |
+| `raw_select` | `selector`, `value`, `tabId`? | Choose a `<select>` option by value or label |
+| `raw_scroll` | `dy`?, `tabId`? | Scroll and return the new `scrollY` |
+| `raw_wait` | `selector`, `state`?, `timeoutMs`? | Wait for attached/visible/hidden/detached |
+| `raw_group` | `label`?, `color`?, `group`? | Put this agent's tabs into one Chrome tab group |
+| `raw_run` | `code`, `timeoutMs`?, `tabId`? | Run a snippet with `page` bound to the agent's tab |
+
+Payloads are compacted for long sessions: `raw_task list` returns summaries
+(no `context_data` / `contract_spec` / `result_data`), `raw_task poll` accepts
+`limit` (default 50) and reports `truncated`, and each failing check's
+`stdout`/`stderr` is cut to 4 000 characters with `outputTruncated: true`.
 
 ## MCP origin permissions
 

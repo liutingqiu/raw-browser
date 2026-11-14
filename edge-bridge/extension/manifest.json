@@ -21,6 +21,7 @@
     "sessions",
     "storage",
     "tabs",
+    "tabGroups",
     "webNavigation"
   ],
   "host_permissions": [

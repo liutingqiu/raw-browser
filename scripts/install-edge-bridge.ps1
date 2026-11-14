@@ -75,6 +75,7 @@ function Get-ManifestVersion([string]$ManifestPath) {
 function Get-PrebuiltHost([string]$Version, [string]$Destination) {
   $asset = "raw-bridge-host-win-x64.zip"
   $url = "$releaseRepo/v$Version/$asset"
+  $latestUrl = "$releaseRepo/latest/download/$asset"
   $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("raw-bridge-" + [Guid]::NewGuid().ToString("n"))
   $zip = Join-Path $temp $asset
   New-Item -ItemType Directory -Path $temp -Force | Out-Null
@@ -83,15 +84,24 @@ function Get-PrebuiltHost([string]$Version, [string]$Destination) {
   try {
     Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
   } catch {
-    Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
-    throw "could not download the prebuilt bridge host ($url). Install the .NET 9 SDK and rerun, pass -HostPath with a local raw-edge-bridge.exe, or publish the release asset. $($_.Exception.Message)"
+    Write-Host "versioned asset unavailable, trying latest: $latestUrl"
+    try {
+      Invoke-WebRequest -Uri $latestUrl -OutFile $zip -UseBasicParsing
+    } catch {
+      Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+      throw "could not download the prebuilt bridge host (tried $url and $latestUrl). Install the .NET 9 SDK and rerun, pass -HostPath with a local raw-edge-bridge.exe, or publish the release asset. $($_.Exception.Message)"
+    }
   }
 
   # Verify the archive when the release publishes checksums. A missing sums
   # file is a warning; a mismatch is fatal.
   try {
     $sumsUrl = "$releaseRepo/v$Version/SHA256SUMS.txt"
-    $sums = (Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing).Content
+    try {
+      $sums = (Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing).Content
+    } catch {
+      $sums = (Invoke-WebRequest -Uri "$releaseRepo/latest/download/SHA256SUMS.txt" -UseBasicParsing).Content
+    }
     $line = ($sums -split "`n") | Where-Object { $_ -match [regex]::Escape($asset) } | Select-Object -First 1
     if ($line) {
       $expected = ($line.Trim() -split '\s+')[0].ToLowerInvariant()

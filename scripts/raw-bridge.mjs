@@ -50,9 +50,18 @@ function readConfig() {
   return { token: parsed.token, port: Number(parsed.port) || (isChromeTarget ? 9334 : 9333) };
 }
 
-const config = readConfig();
-const base = `http://127.0.0.1:${config.port}`;
-const authHeaders = { "X-Raw-Bridge-Token": config.token };
+// Read the token only when a command actually needs the bridge, so --help and
+// argument errors work before the bridge is installed.
+let _config = null;
+function config() {
+  return (_config ??= readConfig());
+}
+function bridgeBase() {
+  return `http://127.0.0.1:${config().port}`;
+}
+function bridgeHeaders() {
+  return { "X-Raw-Bridge-Token": config().token };
+}
 const bridgeName = isChromeTarget ? "Chrome" : "Edge";
 /** Agent tabs open behind the human's, so focus never jumps. */
 const BACKGROUND = process.env.RAW_TAB_BACKGROUND === "1";
@@ -78,15 +87,15 @@ function normalizeUrl(value) {
 async function http(pathname, init = {}) {
   let response;
   try {
-    response = await fetch(`${base}${pathname}`, {
+    response = await fetch(`${bridgeBase()}${pathname}`, {
       ...init,
-      headers: { ...authHeaders, ...(init.headers ?? {}) },
+      headers: { ...bridgeHeaders(), ...(init.headers ?? {}) },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (error) {
     const cause = error?.cause?.code ? ` (${error.cause.code})` : "";
     throw new Error(
-      `cannot reach the ${bridgeName} bridge on 127.0.0.1:${config.port}${cause}. ` +
+      `cannot reach the ${bridgeName} bridge on 127.0.0.1:${config().port}${cause}. ` +
         `Check that the Raw Browser Bridge extension is loaded in ${bridgeName} and its native host is installed — ` +
         `install with: ${installHint}`,
     );
@@ -131,7 +140,7 @@ function closeWebSocket(socket) {
 /** open a CDP-over-WebSocket channel: /devtools/browser/... or /devtools/page/{id} */
 function openSocket(kind, tabId) {
   const route = kind === "browser" ? "/devtools/browser/raw-edge" : `/devtools/page/${encodeURIComponent(tabId)}`;
-  const url = `${base.replace("http", "ws")}${route}?token=${encodeURIComponent(config.token)}`;
+  const url = `${bridgeBase().replace("http", "ws")}${route}?token=${encodeURIComponent(config().token)}`;
   const socket = new WebSocket(url);
   let counter = 0;
   const pending = new Map();
@@ -165,7 +174,7 @@ function openSocket(kind, tabId) {
   const ready = new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve);
     socket.addEventListener("error", () =>
-      reject(new Error(`the ${bridgeName} bridge on 127.0.0.1:${config.port} refused the debugger socket; reload the extension or reinstall the host: ${installHint}`)));
+      reject(new Error(`the ${bridgeName} bridge on 127.0.0.1:${config().port} refused the debugger socket; reload the extension or reinstall the host: ${installHint}`)));
   });
 
   const send = async (method, params = {}) => {
@@ -290,6 +299,62 @@ async function resolveTab(explicit) {
   return String(active.id);
 }
 
+/* Minimal key table: enough for form submission and navigation, not a full IME. */
+const KEY_NAMES = {
+  enter: { key: "Enter", code: "Enter", vk: 13, text: "\r" },
+  return: { key: "Enter", code: "Enter", vk: 13, text: "\r" },
+  tab: { key: "Tab", code: "Tab", vk: 9 },
+  escape: { key: "Escape", code: "Escape", vk: 27 },
+  esc: { key: "Escape", code: "Escape", vk: 27 },
+  backspace: { key: "Backspace", code: "Backspace", vk: 8 },
+  delete: { key: "Delete", code: "Delete", vk: 46 },
+  del: { key: "Delete", code: "Delete", vk: 46 },
+  space: { key: " ", code: "Space", vk: 32, text: " " },
+  arrowup: { key: "ArrowUp", code: "ArrowUp", vk: 38 },
+  up: { key: "ArrowUp", code: "ArrowUp", vk: 38 },
+  arrowdown: { key: "ArrowDown", code: "ArrowDown", vk: 40 },
+  down: { key: "ArrowDown", code: "ArrowDown", vk: 40 },
+  arrowleft: { key: "ArrowLeft", code: "ArrowLeft", vk: 37 },
+  left: { key: "ArrowLeft", code: "ArrowLeft", vk: 37 },
+  arrowright: { key: "ArrowRight", code: "ArrowRight", vk: 39 },
+  right: { key: "ArrowRight", code: "ArrowRight", vk: 39 },
+  home: { key: "Home", code: "Home", vk: 36 },
+  end: { key: "End", code: "End", vk: 35 },
+  pageup: { key: "PageUp", code: "PageUp", vk: 33 },
+  pgup: { key: "PageUp", code: "PageUp", vk: 33 },
+  pagedown: { key: "PageDown", code: "PageDown", vk: 34 },
+  pgdn: { key: "PageDown", code: "PageDown", vk: 34 },
+};
+const MODIFIER_BITS = { alt: 1, option: 1, ctrl: 2, control: 2, meta: 4, cmd: 4, command: 4, shift: 8 };
+
+function keySpec(chord) {
+  const raw = String(chord ?? "");
+  const parts = (raw === "+" ? ["+"] : raw.split("+")).map((part) => part.trim()).filter(Boolean);
+  const token = parts.pop() ?? "";
+  let modifiers = 0;
+  for (const part of parts) modifiers |= MODIFIER_BITS[part.toLowerCase()] ?? 0;
+  const named = KEY_NAMES[token.toLowerCase()];
+  if (named) {
+    return { ...named, modifiers, text: (modifiers & 7) === 0 ? named.text : undefined };
+  }
+  if (/^[a-z]$/i.test(token)) {
+    const lower = token.toLowerCase();
+    const shift = (modifiers & 8) !== 0;
+    const key = shift ? lower.toUpperCase() : lower;
+    return {
+      key,
+      code: `Key${lower.toUpperCase()}`,
+      vk: lower.toUpperCase().charCodeAt(0),
+      modifiers,
+      text: (modifiers & 7) === 0 ? key : undefined,
+    };
+  }
+  if (/^[0-9]$/.test(token)) {
+    return { key: token, code: `Digit${token}`, vk: token.charCodeAt(0), modifiers, text: (modifiers & 7) === 0 ? token : undefined };
+  }
+  throw new Error(`unsupported key "${chord}"`);
+}
+
 const commands = {
   async status() {
     const version = await http("/json/version");
@@ -297,7 +362,7 @@ const commands = {
       bridge: version.Browser,
       protocol: version["Protocol-Version"],
       extension: version["Raw-Extension-Version"],
-      port: config.port,
+      port: config().port,
     };
   },
 
@@ -448,6 +513,68 @@ const commands = {
     });
   },
 
+  async press(tabId, key) {
+    const id = await resolveTab(tabId);
+    const spec = keySpec(key);
+    return await withPage(id, async (channel) => {
+      await channel.send("Input.dispatchKeyEvent", {
+        type: spec.text ? "keyDown" : "rawKeyDown",
+        key: spec.key,
+        code: spec.code,
+        windowsVirtualKeyCode: spec.vk,
+        nativeVirtualKeyCode: spec.vk,
+        modifiers: spec.modifiers,
+        ...(spec.text ? { text: spec.text, unmodifiedText: spec.text } : {}),
+      });
+      await channel.send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: spec.key,
+        code: spec.code,
+        windowsVirtualKeyCode: spec.vk,
+        nativeVirtualKeyCode: spec.vk,
+        modifiers: spec.modifiers,
+      });
+      return { pressed: key, tabId: id };
+    });
+  },
+
+  async scroll(tabId, dy) {
+    const id = await resolveTab(tabId);
+    const delta = Number(dy) || 0;
+    return await withPage(id, async (channel) => {
+      const scrollY = await channel.send("Runtime.evaluate", {
+        expression: `(window.scrollBy(0, ${delta}), window.scrollY)`,
+        returnByValue: true,
+      });
+      return { tabId: id, scrollY: scrollY?.result?.value ?? null };
+    });
+  },
+
+  async select(tabId, selector, value) {
+    const id = await resolveTab(tabId);
+    return await withPage(id, async (channel) => {
+      await ensureHelpers(channel);
+      const result = await channel.send("Runtime.evaluate", {
+        expression: `(() => {
+          const el = window.__mai.find(${JSON.stringify(selector)});
+          if (!el || el.tagName !== 'SELECT') return { error: 'element not found or not a select' };
+          const wanted = ${JSON.stringify(String(value ?? ""))};
+          const option = [...el.options].find((item) => item.value === wanted || item.label === wanted || item.text === wanted);
+          if (!option) return { error: 'no matching option: ' + wanted };
+          const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+          if (setter) setter.call(el, option.value); else el.value = option.value;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { value: el.value, label: option.label };
+        })()`,
+        returnByValue: true,
+      });
+      const valueOut = result?.result?.value;
+      if (!valueOut || valueOut.error) throw new Error(valueOut?.error ?? "could not select option");
+      return { tabId: id, ...valueOut };
+    });
+  },
+
   /** open a throwaway tab, navigate, read, and close it in one attach */
   async visit(rawUrl, expression, waitArg) {
     const url = normalizeUrl(rawUrl);
@@ -541,6 +668,9 @@ function usage() {
   snapshot [tabId]                numbered elements plus page text
   click [tabId] <selector>        click an element
   fill [tabId] <selector> <value> write into a field
+  press [tabId] <key>             press a key or chord (Enter, Control+a)
+  scroll [tabId] [dy]             scroll the page and return scrollY
+  select [tabId] <selector> <value> choose a <select> option
   visit <url> [expr] [waitMs]     open, read and close a throwaway tab
   screenshot [tabId] [file.png]   save a PNG
   cookies [domain]                list cookies (values included)
@@ -560,7 +690,7 @@ const rawCliArgs = process.argv.slice(2).filter((arg) => arg !== "--chrome");
 const [command, ...args] = rawCliArgs;
 
 // a leading numeric tabId is optional for the tab-scoped commands
-const TAB_SCOPED = new Set(["goto", "eval", "title", "url", "text", "html", "snapshot", "click", "fill", "screenshot", "cookies", "proxy", "history", "frames", "notify"]);
+const TAB_SCOPED = new Set(["goto", "eval", "title", "url", "text", "html", "snapshot", "click", "fill", "press", "scroll", "select", "screenshot", "cookies", "proxy", "history", "frames", "notify"]);
 
 if (!command || command === "help" || command === "--help" || command === "-h") {
   usage();

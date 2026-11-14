@@ -226,11 +226,13 @@ PowerShell) to remove the old `host-*` directories.
 ## MCP server
 
 `npm install -g raw-browser` also installs `raw-mcp`, a stdio MCP server that
-exposes the runtime as 22 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
-`raw_claim`, `raw_release`, `raw_close`, `raw_approve`, `raw_new`, `raw_goto`,
-`raw_text`, `raw_html`, `raw_eval`, `raw_snapshot`, `raw_click`, `raw_fill`,
-`raw_visit`, `raw_screenshot`, `raw_cookies`, `raw_frames`, the `raw_call`
-escape hatch, plus the two multi-agent tools `raw_task` and `raw_term`.
+exposes the runtime as 29 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
+`raw_claim`, `raw_release`, `raw_close`, `raw_clone`, `raw_approve`, `raw_new`,
+`raw_goto`, `raw_text`, `raw_html`, `raw_eval`, `raw_snapshot`, `raw_click`,
+`raw_fill`, `raw_press`, `raw_select`, `raw_scroll`, `raw_wait`, `raw_group`,
+`raw_run`, `raw_visit`, `raw_screenshot`, `raw_cookies`, `raw_frames`, the
+`raw_call` escape hatch, plus the two multi-agent tools `raw_task` and
+`raw_term`.
 
 ```json
 {
@@ -274,17 +276,32 @@ the human keeps focus on whatever they were reading. `raw_claim` opens a tab
 (or takes an existing one) and records the model-chosen label, which is shown
 on the tab's banner (`data-raw-owner`) and in `raw_tabs`.
 
-Agents still cooperate: naming another agent's `tabId` lets you read or act on
-that tab (the result carries a `[note: tab ... belongs to "..."]` line), which
-is useful when one agent verifies another's work. Only implicit targeting is
-restricted to your own tabs, so nothing silently lands on someone else's page;
-`raw_goto` with no tab of your own opens a new one instead of using the
-human's. `raw_tabs` is read-only and reports `owner` / `owned` per tab.
-`raw_release` hands a tab back; `raw_close` closes it, and closing another
-agent's tab needs `force: true`. Renaming the label keeps the tabs already
-owned. Ownership lives in `$RAW_HOME/tab-owners-<browser>.json`, shared by
-every agent process. `raw_call` remains a trusted escape hatch and is not
+Agents still cooperate, but read-only: naming another agent's `tabId` lets you
+read it (`raw_text`, `raw_html`, `raw_snapshot`, `raw_screenshot`, `raw_frames`)
+and the result carries a `[note: tab ... belongs to "..."]` line. Anything that
+can change the page — `click`, `fill`, `press`, `select`, `scroll`, `eval`,
+`goto` — is refused on a foreign tab and points at `raw_clone`, which copies
+the URL and scroll position into a new tab this agent owns. Only implicit
+targeting is restricted to your own tabs, so nothing silently lands on someone
+else's page; `raw_goto` with no tab of your own opens a new one. `raw_tabs` is
+read-only and reports `owner` / `owned` per tab. `raw_release` hands a tab
+back; `raw_close` closes it, and closing another agent's tab needs
+`force: true`. Renaming the label keeps the tabs already owned. `raw_group` puts
+this agent's tabs into one Chrome tab group titled with its label (reload the
+extension once after upgrading: it now declares the `tabGroups` permission).
+Ownership lives in `$RAW_HOME/tab-owners-<browser>.json`, shared by every agent
+process. `raw_call` remains a trusted escape hatch and is not
 ownership-checked.
+
+### Code as action
+
+`raw_run` takes a JavaScript snippet bound to this agent's tab:
+`page.goto/click/fill/press/scroll/select/text/html/eval/snapshot/screenshot/waitFor`,
+plus `sleep` and `console`. One call can fill a form, submit it and read the
+result, instead of a dozen round trips. Large tool payloads are compacted:
+`raw_task list` returns summaries, `raw_task poll` takes a `limit` (default 50)
+and reports `truncated`, and a failing check's output is cut to 4 000 chars
+with `outputTruncated: true`.
 
 ### Origin permissions
 
