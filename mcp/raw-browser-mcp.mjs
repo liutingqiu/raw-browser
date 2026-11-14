@@ -16,6 +16,18 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import {
+  claimTab,
+  defaultRegistryPath,
+  ownedTabIds,
+  ownerOf,
+  pruneRegistry,
+  readRegistry,
+  releaseTab,
+  renameOwner,
+  sanitizeLabel,
+} from "../scripts/tab-owners.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TIMEOUT = Number(process.env.RAW_MCP_TIMEOUT_MS || 60_000);
 
@@ -141,8 +153,41 @@ const tools = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "raw_claim",
+    description:
+      "Claim a tab for this agent (opens one unless tabId is given). The label is shown on the tab banner and in raw_tabs; other agents cannot act on a claimed tab.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        label: { type: "string", description: "Agent name shown on the tab (max 32 chars)" },
+        tabId: { type: "string", description: "Existing tab to claim instead of opening one" },
+        url: { type: "string", description: "URL for the new tab (default about:blank)" },
+        force: { type: "boolean", description: "Take a tab controlled by another label" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_release",
+    description: "Release a claimed tab back to the pool without closing it.",
+    inputSchema: {
+      type: "object",
+      properties: { tabId: { type: "string", description: "Tab to release (defaults to your current tab)" } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "raw_close",
+    description: "Close a tab this agent owns and release it.",
+    inputSchema: {
+      type: "object",
+      properties: { tabId: { type: "string", description: "Tab to close (defaults to your current tab)" } },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "raw_new",
-    description: "Open a new tab at a URL, wait for it to load, and make it the current tab.",
+    description: "Open a new tab at a URL, wait for it to load, and claim it for this agent.",
     inputSchema: {
       type: "object",
       properties: { url: { type: "string", description: "URL to open" } },
@@ -346,7 +391,7 @@ function runRaw(argv, timeoutMs = DEFAULT_TIMEOUT, requestId) {
   return new Promise((resolve) => {
     const child = spawn(NODE, [RAW_CLI, ...bridgeArgs(), ...argv], {
       windowsHide: true,
-      env: { ...process.env, RAW_BRIDGE_BROWSER: browser },
+      env: { ...process.env, RAW_BRIDGE_BROWSER: browser, RAW_OWNER_LABEL: ownerLabel },
     });
     if (requestId !== undefined) inFlight.set(requestId, child);
     let stdout = "";
@@ -383,16 +428,73 @@ function succeeded(result) {
   return result.ok || (result.value && typeof result.value === "object" && !result.value.error);
 }
 
-function requiredTab(args = {}) {
-  return args.tabId ?? currentTabId ?? undefined;
+/** Each MCP process is one agent; the label is what the page banner shows. */
+/** Chrome and Edge tabs share nothing, so each browser gets its own registry file. */
+function registryFile() {
+  if (process.env.RAW_TAB_OWNERS_FILE) return process.env.RAW_TAB_OWNERS_FILE;
+  const dir = path.dirname(defaultRegistryPath());
+  return path.join(dir, `tab-owners-${browser}.json`);
+}
+const DEFAULT_OWNER = sanitizeLabel(process.env.RAW_OWNER_LABEL || "agent");
+let ownerLabel = process.env.RAW_OWNER_LABEL ? sanitizeLabel(process.env.RAW_OWNER_LABEL) : "";
+
+function ensureOwner() {
+  if (!ownerLabel) ownerLabel = DEFAULT_OWNER;
+  return ownerLabel;
 }
 
-async function rememberTab(result) {
-  const value = result.value;
-  if (value && typeof value === "object") {
-    if (value.id !== undefined && value.id !== null) currentTabId = String(value.id);
-    else if (value.tabId !== undefined && value.tabId !== null) currentTabId = String(value.tabId);
+function ownedTabs() {
+  return ownerLabel ? ownedTabIds(ownerLabel, { file: registryFile() }) : [];
+}
+
+function ownerError(tabId, owner) {
+  if (owner) {
+    return `tab ${tabId} is controlled by "${owner}"; use one of your own tabs, or call raw_claim { "label": "${ownerLabel || DEFAULT_OWNER}", "tabId": "${tabId}", "force": true } to take it over`;
   }
+  return `tab ${tabId} is not claimed; call raw_claim { "label": "${ownerLabel || DEFAULT_OWNER}", "tabId": "${tabId}" } first`;
+}
+
+/** Explicit tab ids must belong to this agent. */
+function assertOwned(tabId) {
+  const id = String(tabId);
+  const owner = ownerOf(id, { file: registryFile() });
+  const label = ensureOwner();
+  if (owner !== label) throw new Error(ownerError(id, owner));
+  return id;
+}
+
+/** The tab a tab-scoped tool should act on, or an actionable error. */
+function resolveOwnedTab(explicit) {
+  if (explicit !== undefined && explicit !== null && explicit !== "") return assertOwned(explicit);
+  const owned = ownedTabs();
+  if (currentTabId && owned.includes(currentTabId)) return currentTabId;
+  if (owned.length > 0) return owned[0];
+  throw new Error(
+    `you have no claimed tab; call raw_claim { "label": "your-agent-name" } to open one, ` +
+      `or raw_claim with "tabId" to take an existing tab`,
+  );
+}
+
+/** Paint the owner label where the extension overlay reads it. */
+async function stampOwner(tabId, label, requestId) {
+  const expression =
+    `(window.__rawOwner = { label: ${JSON.stringify(label)} }, ` +
+    `document.documentElement && document.documentElement.setAttribute("data-raw-owner", ${JSON.stringify(label)}), "ok")`;
+  await runRaw(["eval", String(tabId), expression], 15_000, requestId).catch(() => {});
+}
+
+/** Open a fresh tab and claim it, so a new agent never borrows the human's tab. */
+async function openClaimedTab(url, requestId) {
+  const label = ensureOwner();
+  const result = await runRaw(["new", String(url ?? "about:blank")], DEFAULT_TIMEOUT, requestId);
+  if (!succeeded(result)) return { error: asText(result.value ?? result.text) };
+  const value = result.value;
+  const tabId = String(value?.id ?? value?.tabId ?? "");
+  if (!tabId) return { error: asText(result.value ?? result.text) };
+  claimTab(label, tabId, { file: registryFile() });
+  currentTabId = tabId;
+  await stampOwner(tabId, label, requestId);
+  return { tabId, label };
 }
 
 async function callTool(name, args = {}, requestId) {
@@ -407,31 +509,129 @@ async function callTool(name, args = {}, requestId) {
     }
     case "raw_status": {
       const result = await runRaw(["status"], DEFAULT_TIMEOUT, requestId);
-      return { text: result.text, isError: !result.ok };
+      const owned = ownedTabs();
+      const owner = ownerLabel || "(none — call raw_claim)";
+      return {
+        text: `${result.text}\nowner: ${owner}\nowned tabs: ${owned.length ? owned.join(", ") : "none"}`,
+        isError: !result.ok,
+      };
     }
     case "raw_tabs": {
       const result = await runRaw(["tabs"], DEFAULT_TIMEOUT, requestId);
-      if (result.ok && Array.isArray(result.value)) {
-        const active = result.value.find((tab) => tab.active);
-        currentTabId = active ? String(active.id) : (currentTabId ?? (result.value[0] ? String(result.value[0].id) : null));
+      if (!result.ok || !Array.isArray(result.value)) {
+        return { text: asText(result.value ?? result.text), isError: !result.ok };
       }
-      return { text: asText(result.value ?? result.text), isError: !result.ok };
+      const ids = result.value.map((tab) => String(tab.id));
+      pruneRegistry(ids, { file: registryFile() });
+      const state = readRegistry(registryFile());
+      const label = ownerLabel;
+      const annotated = result.value.map((tab) => {
+        const id = String(tab.id);
+        const owner = state.tabs[id] ?? null;
+        return { ...tab, owner, owned: Boolean(label) && owner === label };
+      });
+      // Listing tabs is read-only: keep working on the tab we already own.
+      const owned = annotated.filter((tab) => tab.owned).map((tab) => String(tab.id));
+      if (!currentTabId || !owned.includes(currentTabId)) currentTabId = owned[0] ?? null;
+      return { text: asText(annotated), isError: false };
     }
     case "raw_new": {
-      const result = await runRaw(["new", String(args.url ?? "about:blank")], DEFAULT_TIMEOUT, requestId);
-      await rememberTab(result);
-      return { text: asText(result.value ?? result.text), isError: !succeeded(result) };
+      const opened = await openClaimedTab(args.url, requestId);
+      if (opened.error) return { text: opened.error, isError: true };
+      return {
+        text: JSON.stringify({ tabId: opened.tabId, label: opened.label, ownedTabs: ownedTabs() }, null, 2),
+        isError: false,
+      };
     }
     case "raw_goto": {
-      const tabId = requiredTab(args);
-      const argv = ["goto", String(args.url)];
-      if (tabId) argv.push(String(tabId));
-      const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
-      await rememberTab(result);
+      const url = String(args.url ?? "about:blank");
+      let tabId;
+      if (args.tabId !== undefined && args.tabId !== null && args.tabId !== "") {
+        tabId = assertOwned(args.tabId);
+      } else {
+        const owned = ownedTabs();
+        tabId = owned.includes(currentTabId) ? currentTabId : owned[0];
+      }
+      if (!tabId) {
+        // No tab of our own yet: open one instead of navigating the human's.
+        const opened = await openClaimedTab(url, requestId);
+        if (opened.error) return { text: opened.error, isError: true };
+        return {
+          text: JSON.stringify({ tabId: opened.tabId, url, label: opened.label, ownedTabs: ownedTabs() }, null, 2),
+          isError: false,
+        };
+      }
+      const result = await runRaw(["goto", String(tabId), url], DEFAULT_TIMEOUT, requestId);
+      if (succeeded(result)) {
+        currentTabId = String(tabId);
+        await stampOwner(tabId, ownerLabel || DEFAULT_OWNER, requestId);
+      }
       return { text: asText(result.value ?? result.text), isError: !succeeded(result) };
     }
+    case "raw_claim": {
+      const label = sanitizeLabel(args.label ?? ownerLabel ?? DEFAULT_OWNER);
+      if (ownerLabel && label !== ownerLabel) {
+        // Renaming keeps the tabs this agent already owns.
+        renameOwner(ownerLabel, label, { file: registryFile() });
+      }
+      ownerLabel = label;
+      let tabId;
+      if (args.tabId !== undefined && args.tabId !== null && args.tabId !== "") {
+        tabId = String(args.tabId);
+        try {
+          claimTab(label, tabId, { file: registryFile(), force: args.force === true });
+        } catch (error) {
+          return { text: `${error.message}; pass "force": true to take it over`, isError: true };
+        }
+      } else {
+        const opened = await openClaimedTab(args.url, requestId);
+        if (opened.error) return { text: opened.error, isError: true };
+        tabId = opened.tabId;
+      }
+      currentTabId = tabId;
+      await stampOwner(tabId, label, requestId);
+      return {
+        text: JSON.stringify({ label, tabId, ownedTabs: ownedTabIds(label, { file: registryFile() }) }, null, 2),
+        isError: false,
+      };
+    }
+    case "raw_release": {
+      let tabId;
+      try {
+        tabId = args.tabId ? assertOwned(args.tabId) : resolveOwnedTab();
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      releaseTab(ownerLabel, tabId, { file: registryFile() });
+      if (currentTabId === tabId) currentTabId = ownedTabs()[0] ?? null;
+      return {
+        text: JSON.stringify({ released: tabId, ownedTabs: ownedTabs() }, null, 2),
+        isError: false,
+      };
+    }
+    case "raw_close": {
+      let tabId;
+      try {
+        tabId = args.tabId ? assertOwned(args.tabId) : resolveOwnedTab();
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      const result = await runRaw(["close", tabId], DEFAULT_TIMEOUT, requestId);
+      releaseTab(ownerLabel, tabId, { file: registryFile() });
+      if (currentTabId === tabId) currentTabId = ownedTabs()[0] ?? null;
+      if (!result.ok) {
+        return {
+          text: `${asText(result.value ?? result.text)}\n(the tab was released from this agent; it may already be gone)`,
+          isError: true,
+        };
+      }
+      return {
+        text: JSON.stringify({ closed: tabId, ownedTabs: ownedTabs() }, null, 2),
+        isError: false,
+      };
+    }
     case "raw_text": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["text"];
       if (tabId) argv.push(String(tabId));
       if (args.selector) argv.push(String(args.selector));
@@ -439,7 +639,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_html": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["html"];
       if (tabId) argv.push(String(tabId));
       if (args.selector) argv.push(String(args.selector));
@@ -447,7 +647,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text, 50_000), isError: !result.ok };
     }
     case "raw_eval": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["eval"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.expression ?? ""));
@@ -455,7 +655,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_snapshot": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["snapshot"];
       if (tabId) argv.push(String(tabId));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
@@ -464,7 +664,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(text, 30_000), isError: !result.ok };
     }
     case "raw_click": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["click"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.selector));
@@ -472,7 +672,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_fill": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["fill"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.selector), String(args.value ?? ""));
@@ -485,7 +685,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_screenshot": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["screenshot"];
       if (tabId) argv.push(String(tabId));
       if (args.out) argv.push(String(args.out));
@@ -512,7 +712,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: false };
     }
     case "raw_cookies": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["cookies"];
       if (tabId) argv.push(String(tabId));
       if (args.domain) argv.push(String(args.domain));
@@ -520,7 +720,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_frames": {
-      const tabId = requiredTab(args);
+      const tabId = resolveOwnedTab(args.tabId);
       const argv = ["frames"];
       if (tabId) argv.push(String(tabId));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);

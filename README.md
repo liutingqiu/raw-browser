@@ -226,11 +226,11 @@ PowerShell) to remove the old `host-*` directories.
 ## MCP server
 
 `npm install -g raw-browser` also installs `raw-mcp`, a stdio MCP server that
-exposes the runtime as 18 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
-`raw_new`, `raw_goto`, `raw_text`, `raw_html`, `raw_eval`, `raw_snapshot`,
-`raw_click`, `raw_fill`, `raw_visit`, `raw_screenshot`, `raw_cookies`,
-`raw_frames`, the `raw_call` escape hatch, plus the two multi-agent tools
-`raw_task` and `raw_term`.
+exposes the runtime as 21 MCP tools: `raw_use`, `raw_status`, `raw_tabs`,
+`raw_claim`, `raw_release`, `raw_close`, `raw_new`, `raw_goto`, `raw_text`,
+`raw_html`, `raw_eval`, `raw_snapshot`, `raw_click`, `raw_fill`, `raw_visit`,
+`raw_screenshot`, `raw_cookies`, `raw_frames`, the `raw_call` escape hatch,
+plus the two multi-agent tools `raw_task` and `raw_term`.
 
 ```json
 {
@@ -266,6 +266,25 @@ to pick a bridge. The server is registered in the
 [HOL Guard](https://github.com/hashgraph-online/hol-guard) MCP catalog as
 `mcp.raw-browser`: read-only tools inherit normal policy, navigation, input and
 cookie reads are reviewed, and `raw_eval` / `raw_call` are blocked.
+
+### Tab ownership
+
+Every agent claims its own tabs and cannot act on anyone else's. `raw_claim`
+opens a tab (or takes an existing one) and records which agent owns it; the
+label you pass is shown on the tab's banner and in `raw_tabs`. Tab-scoped tools
+refuse a tab owned by another label, and navigation never falls back to
+whatever tab the human is reading: `raw_goto` with no tab of your own opens a
+new one. `raw_tabs` is read-only and reports `owner` / `owned` per tab.
+`raw_release` gives a tab back, `raw_close` closes it. Ownership lives in
+`$RAW_HOME/tab-owners.json` and is shared by every agent process.
+
+```json
+{ "label": "dsh-content", "url": "https://example.com" }
+```
+
+is the `raw_claim` call that starts a working session. Renaming the label keeps
+the tabs already owned. `raw_call` remains a trusted escape hatch and is not
+ownership-checked.
 
 ### Multi-agent tools
 

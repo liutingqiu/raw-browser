@@ -196,6 +196,30 @@ logged so far, and returns a non-zero exit status from the CLI. Results are
 truncated to 24 000 characters; use `page.text(selector)` or
 `page.snapshot({ root })` to narrow large reads.
 
+## MCP tab ownership
+
+Several agents can share one browser without fighting over tabs. Each MCP
+process is one agent, identified by a label (the name shown on the tab banner).
+Ownership is stored in `$RAW_HOME/tab-owners.json` and shared by every process.
+
+| Tool | Parameters | What it does |
+|---|---|---|
+| `raw_claim` | `label`, `tabId`?, `url`?, `force`? | Open a tab (or take `tabId`) and claim it; `label` renames this agent and keeps its tabs |
+| `raw_release` | `tabId`? | Give a tab back without closing it |
+| `raw_close` | `tabId`? | Close a tab this agent owns and release it |
+
+Every tab-scoped tool resolves its target like this:
+
+1. an explicit `tabId` must belong to this agent, otherwise the call fails with
+   the owner's label and a hint to `raw_claim ... force: true`;
+2. otherwise the agent's current tab, or its first owned tab;
+3. otherwise `raw_goto` opens a new tab rather than touching the human's
+   active tab, and other tools return "you have no claimed tab".
+
+`raw_tabs` is read-only: it annotates each tab with `owner` and `owned` and
+never changes the current target. `raw_call` is a trusted escape hatch and is
+not ownership-checked, so agents should not use it to reach foreign tabs.
+
 ## MCP multi-agent tools
 
 The stdio server exposes two folded tools so a team of agents shares one
