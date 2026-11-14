@@ -212,11 +212,11 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 ## MCP server
 
 `npm install -g raw-browser` 会同时安装 `raw-mcp`，这是一个 stdio MCP server，
-把运行时暴露为 21 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
-`raw_claim`、`raw_release`、`raw_close`、`raw_new`、`raw_goto`、`raw_text`、
-`raw_html`、`raw_eval`、`raw_snapshot`、`raw_click`、`raw_fill`、`raw_visit`、
-`raw_screenshot`、`raw_cookies`、`raw_frames`、逃生舱 `raw_call`，以及两个
-多 Agent 工具 `raw_task` 和 `raw_term`。
+把运行时暴露为 22 个 MCP 工具：`raw_use`、`raw_status`、`raw_tabs`、
+`raw_claim`、`raw_release`、`raw_close`、`raw_approve`、`raw_new`、`raw_goto`、
+`raw_text`、`raw_html`、`raw_eval`、`raw_snapshot`、`raw_click`、`raw_fill`、
+`raw_visit`、`raw_screenshot`、`raw_cookies`、`raw_frames`、逃生舱 `raw_call`，
+以及两个多 Agent 工具 `raw_task` 和 `raw_term`。
 
 ```json
 {
@@ -254,16 +254,32 @@ Native Messaging 宿主路径。从旧版安装脚本升级的用户，重启浏
 
 ### 标签页归属
 
-每个 Agent 只能操作自己认领的标签页。`raw_claim` 会新开一个标签页（或接管已有的），
-把归属记下来，标签页上的横幅会显示你传入的 label；别的 Agent 的标签页会被拒绝操作。
-没有自己的标签页时，`raw_goto` 会新开一个，而不是跳到你正在看的页面。
-`raw_tabs` 只读，会返回每个标签页的 `owner` / `owned`；`raw_release` 归还，
-`raw_close` 关闭。归属存在 `$RAW_HOME/tab-owners.json`，所有 Agent 进程共享。
-改 label 会保留已认领的标签页；`raw_call` 是受信任的逃生舱，不做归属校验。
+每个 Agent 认领自己的标签页，而且 **Agent 的标签页一律在后台新开**，不抢人类的焦点。
+`raw_claim` 新开（或接管）一个标签页并记下模型自己起的 label，横幅会显示，
+`raw_tabs` 也会返回。
+
+Agent 之间仍然可以配合：显式传入别人的 `tabId` 可以读取或操作，返回里会带一行
+`[note: tab ... belongs to "..."]`；只有「不指定 tabId」的隐式目标被限制在自己的标签页，
+所以不会悄悄落到别人的页面上。没有自己的标签页时 `raw_goto` 会新开一个，而不是用人类
+正在看的页面。`raw_tabs` 只读；`raw_release` 归还；`raw_close` 关闭，关别人的标签页
+需要 `force: true`。改 label 会保留已认领的标签页。归属存在
+`$RAW_HOME/tab-owners-<browser>.json`，所有 Agent 进程共享。
+
+### 站点授权
+
+因为驱动的是人类已登录的真实浏览器，导航可以要求确认。`$RAW_HOME/permissions.json`
+默认 `{"defaultAccess": "allow"}`；可以设成 `"ask"` / `"deny"`，或按站点固定：
 
 ```json
-{ "label": "dsh-content", "url": "https://example.com" }
+{
+  "defaultAccess": "ask",
+  "origins": { "https://github.com": { "access": "allow" } }
+}
 ```
+
+`ask` 模式下导航会返回一个带 origin 的错误；人类同意后调用
+`raw_approve { "origin": "https://example.com", "scope": "session" }` 放行本次进程，
+`scope: "persistent"` 会写进文件。
 
 ### 多 Agent 工具
 

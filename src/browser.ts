@@ -274,6 +274,10 @@ function findBrowser(preferred: BrowserKind = EXTERNAL_BRIDGE ? BRIDGE_BROWSER :
 export function normalizeUrl(url: string): string {
   const value = String(url ?? "").trim();
   if (!value) return "about:blank";
+  if (value.startsWith("//")) return `https:${value}`;
+  // "localhost:3000" and "example.com:8080" look like a scheme to the regex
+  // below but are host:port pairs, which must get https.
+  if (/^[a-z][a-z0-9+.-]*:\d+(?:[/?#]|$)/i.test(value)) return `https://${value}`;
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
   return `https://${value}`;
 }

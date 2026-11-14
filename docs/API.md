@@ -200,25 +200,44 @@ truncated to 24 000 characters; use `page.text(selector)` or
 
 Several agents can share one browser without fighting over tabs. Each MCP
 process is one agent, identified by a label (the name shown on the tab banner).
-Ownership is stored in `$RAW_HOME/tab-owners.json` and shared by every process.
+Agent tabs open in the background, so the human keeps focus. Ownership is stored
+in `$RAW_HOME/tab-owners-<browser>.json` and shared by every process.
 
 | Tool | Parameters | What it does |
 |---|---|---|
 | `raw_claim` | `label`, `tabId`?, `url`?, `force`? | Open a tab (or take `tabId`) and claim it; `label` renames this agent and keeps its tabs |
 | `raw_release` | `tabId`? | Give a tab back without closing it |
-| `raw_close` | `tabId`? | Close a tab this agent owns and release it |
+| `raw_close` | `tabId`?, `force`? | Close a tab and release it; another agent's tab needs `force: true` |
 
-Every tab-scoped tool resolves its target like this:
+Target resolution:
 
-1. an explicit `tabId` must belong to this agent, otherwise the call fails with
-   the owner's label and a hint to `raw_claim ... force: true`;
+1. an explicit `tabId` is always honoured — agents cooperate, and the result
+   carries a `[note: tab ... belongs to "..."]` line when it is someone else's;
 2. otherwise the agent's current tab, or its first owned tab;
-3. otherwise `raw_goto` opens a new tab rather than touching the human's
-   active tab, and other tools return "you have no claimed tab".
+3. otherwise `raw_goto` opens a new tab rather than touching the human's active
+   tab, and other tools return "you have no claimed tab".
 
 `raw_tabs` is read-only: it annotates each tab with `owner` and `owned` and
 never changes the current target. `raw_call` is a trusted escape hatch and is
 not ownership-checked, so agents should not use it to reach foreign tabs.
+
+## MCP origin permissions
+
+`$RAW_HOME/permissions.json` controls navigation:
+
+```json
+{ "defaultAccess": "allow", "origins": { "https://github.com": { "access": "allow" } } }
+```
+
+`allow` (default), `ask` and `deny`; an origin entry wins over the default.
+With `ask`, navigation fails with the origin and the human approves through
+`raw_approve { "origin": "...", "scope": "session" | "persistent" }`. Non-http
+schemes (`file:`, `about:`, `data:`) are outside the origin model.
+
+`raw_task verify` also attaches best-effort evidence when the agent has a
+claimed tab: a screenshot under `$RAW_HOME/evidence/<task>.png` plus the page
+URL and title. Verification is allowed to run up to `RAW_VERIFY_MAX_MS`
+(default 30 minutes) instead of the generic 2-minute local tool cap.
 
 ## MCP multi-agent tools
 

@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import {
   claimTab,
   defaultRegistryPath,
+  forgetTab,
   ownedTabIds,
   ownerOf,
   pruneRegistry,
@@ -27,6 +28,12 @@ import {
   renameOwner,
   sanitizeLabel,
 } from "../scripts/tab-owners.mjs";
+import {
+  accessFor,
+  approveOrigin,
+  defaultPermissionsPath,
+  originFor,
+} from "../scripts/permissions.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TIMEOUT = Number(process.env.RAW_MCP_TIMEOUT_MS || 60_000);
@@ -72,6 +79,8 @@ const inFlight = new Map();
 /** Tools that only touch SQLite/tmux never wait behind a slow browser call. */
 const LOCAL_TOOLS = new Set(["raw_task", "raw_term"]);
 const LOCAL_TOOL_TIMEOUT_MS = Number(process.env.RAW_LOCAL_TOOL_TIMEOUT_MS || 120_000);
+/** A contract can legitimately run longer than the generic local-tool cap. */
+const VERIFY_MAX_MS = Number(process.env.RAW_VERIFY_MAX_MS || 30 * 60_000);
 const MAX_IMAGE_BYTES = Number(process.env.RAW_MCP_MAX_IMAGE_BYTES || 8_000_000);
 
 /** camelCase is canonical; snake_case is accepted so a caller's usual style works. */
@@ -99,7 +108,7 @@ const TASK_PARAMS = {
   get: ["taskId"],
   update: ["taskId", "status", "resultData"],
   submit_artifact: ["taskId", "author", "artifactType", "content"],
-  verify: ["taskId", "cwd"],
+  verify: ["taskId", "cwd", "tabId"],
 };
 
 /**
@@ -168,6 +177,20 @@ const tools = [
     },
   },
   {
+    name: "raw_approve",
+    description:
+      "Approve an origin the human has allowed. scope=session lasts for this process; scope=persistent writes ~/.raw/permissions.json.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        origin: { type: "string", description: "Origin or URL, e.g. https://example.com" },
+        scope: { type: "string", enum: ["session", "persistent"], description: "session = this process, persistent = saved" },
+      },
+      required: ["origin"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "raw_release",
     description: "Release a claimed tab back to the pool without closing it.",
     inputSchema: {
@@ -178,10 +201,13 @@ const tools = [
   },
   {
     name: "raw_close",
-    description: "Close a tab this agent owns and release it.",
+    description: "Close a tab and release it from its owner. Closing another agent's tab needs force.",
     inputSchema: {
       type: "object",
-      properties: { tabId: { type: "string", description: "Tab to close (defaults to your current tab)" } },
+      properties: {
+        tabId: { type: "string", description: "Tab to close (defaults to your current tab)" },
+        force: { type: "boolean", description: "Close a tab that belongs to another agent" },
+      },
       additionalProperties: false,
     },
   },
@@ -391,7 +417,7 @@ function runRaw(argv, timeoutMs = DEFAULT_TIMEOUT, requestId) {
   return new Promise((resolve) => {
     const child = spawn(NODE, [RAW_CLI, ...bridgeArgs(), ...argv], {
       windowsHide: true,
-      env: { ...process.env, RAW_BRIDGE_BROWSER: browser, RAW_OWNER_LABEL: ownerLabel },
+      env: { ...process.env, RAW_BRIDGE_BROWSER: browser, RAW_OWNER_LABEL: ownerLabel, RAW_TAB_BACKGROUND: "1" },
     });
     if (requestId !== undefined) inFlight.set(requestId, child);
     let stdout = "";
@@ -447,32 +473,62 @@ function ownedTabs() {
   return ownerLabel ? ownedTabIds(ownerLabel, { file: registryFile() }) : [];
 }
 
-function ownerError(tabId, owner) {
-  if (owner) {
-    return `tab ${tabId} is controlled by "${owner}"; use one of your own tabs, or call raw_claim { "label": "${ownerLabel || DEFAULT_OWNER}", "tabId": "${tabId}", "force": true } to take it over`;
-  }
-  return `tab ${tabId} is not claimed; call raw_claim { "label": "${ownerLabel || DEFAULT_OWNER}", "tabId": "${tabId}" } first`;
+/** A note for actions that reach into another agent's tab (cooperation, not a refusal). */
+function withNote(text, tabId) {
+  return `${text}${ownershipNote(tabId)}`;
 }
 
-/** Explicit tab ids must belong to this agent. */
-function assertOwned(tabId) {
+function ownershipNote(tabId) {
   const id = String(tabId);
   const owner = ownerOf(id, { file: registryFile() });
-  const label = ensureOwner();
-  if (owner !== label) throw new Error(ownerError(id, owner));
-  return id;
+  if (!owner || owner === ownerLabel) return "";
+  return `\n[note: tab ${id} belongs to "${owner}"]`;
 }
 
-/** The tab a tab-scoped tool should act on, or an actionable error. */
-function resolveOwnedTab(explicit) {
-  if (explicit !== undefined && explicit !== null && explicit !== "") return assertOwned(explicit);
+/**
+ * Explicit tab ids are always allowed — agents cooperate. Only the implicit
+ * target is restricted to tabs this agent owns, so nothing silently lands on
+ * the human's or another agent's page.
+ */
+function targetTab(explicit) {
+  if (explicit !== undefined && explicit !== null && explicit !== "") return String(explicit);
   const owned = ownedTabs();
   if (currentTabId && owned.includes(currentTabId)) return currentTabId;
   if (owned.length > 0) return owned[0];
   throw new Error(
     `you have no claimed tab; call raw_claim { "label": "your-agent-name" } to open one, ` +
-      `or raw_claim with "tabId" to take an existing tab`,
+      `or pass an explicit tabId`,
   );
+}
+
+/** Closing another agent's tab is destructive: require an explicit force. */
+function assertClosable(tabId, force) {
+  const id = String(tabId);
+  const owner = ownerOf(id, { file: registryFile() });
+  if (owner && owner !== ownerLabel && force !== true) {
+    throw new Error(`tab ${id} belongs to "${owner}"; pass "force": true to close it anyway`);
+  }
+  return id;
+}
+
+const PERMISSIONS_FILE = process.env.RAW_PERMISSIONS_FILE || defaultPermissionsPath();
+const sessionOrigins = new Set();
+
+/** Refuse or question a navigation before it reaches the human's profile. */
+function checkOrigin(url) {
+  const decision = accessFor(url, { file: PERMISSIONS_FILE });
+  if (!decision.origin) return decision;
+  if (sessionOrigins.has(decision.origin)) return { ...decision, decision: "allow", source: "session" };
+  if (decision.decision === "deny") {
+    throw new Error(`origin ${decision.origin} is blocked by ${PERMISSIONS_FILE}`);
+  }
+  if (decision.decision === "ask") {
+    throw new Error(
+      `origin ${decision.origin} is not approved; ask the user, then call ` +
+        `raw_approve { "origin": "${decision.origin}", "scope": "session" }`,
+    );
+  }
+  return decision;
 }
 
 /** Paint the owner label where the extension overlay reads it. */
@@ -536,6 +592,11 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(annotated), isError: false };
     }
     case "raw_new": {
+      try {
+        checkOrigin(args.url ?? "about:blank");
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
       const opened = await openClaimedTab(args.url, requestId);
       if (opened.error) return { text: opened.error, isError: true };
       return {
@@ -545,9 +606,14 @@ async function callTool(name, args = {}, requestId) {
     }
     case "raw_goto": {
       const url = String(args.url ?? "about:blank");
+      try {
+        checkOrigin(url);
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
       let tabId;
       if (args.tabId !== undefined && args.tabId !== null && args.tabId !== "") {
-        tabId = assertOwned(args.tabId);
+        tabId = targetTab(args.tabId);
       } else {
         const owned = ownedTabs();
         tabId = owned.includes(currentTabId) ? currentTabId : owned[0];
@@ -566,7 +632,10 @@ async function callTool(name, args = {}, requestId) {
         currentTabId = String(tabId);
         await stampOwner(tabId, ownerLabel || DEFAULT_OWNER, requestId);
       }
-      return { text: asText(result.value ?? result.text), isError: !succeeded(result) };
+      return {
+        text: withNote(asText(result.value ?? result.text), tabId),
+        isError: !succeeded(result),
+      };
     }
     case "raw_claim": {
       const label = sanitizeLabel(args.label ?? ownerLabel ?? DEFAULT_OWNER);
@@ -584,6 +653,11 @@ async function callTool(name, args = {}, requestId) {
           return { text: `${error.message}; pass "force": true to take it over`, isError: true };
         }
       } else {
+        try {
+          checkOrigin(args.url ?? "about:blank");
+        } catch (error) {
+          return { text: error.message, isError: true };
+        }
         const opened = await openClaimedTab(args.url, requestId);
         if (opened.error) return { text: opened.error, isError: true };
         tabId = opened.tabId;
@@ -595,10 +669,24 @@ async function callTool(name, args = {}, requestId) {
         isError: false,
       };
     }
+    case "raw_approve": {
+      const origin = String(args.origin ?? "").trim();
+      if (!origin) return { text: "raw_approve needs origin", isError: true };
+      const scope = args.scope === "persistent" ? "persistent" : "session";
+      const approved = originFor(origin);
+      if (!approved) return { text: `not an http(s) origin: ${origin}`, isError: true };
+      try {
+        if (scope === "persistent") approveOrigin(approved, { file: PERMISSIONS_FILE });
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
+      sessionOrigins.add(approved);
+      return { text: JSON.stringify({ origin: approved, scope }, null, 2), isError: false };
+    }
     case "raw_release": {
       let tabId;
       try {
-        tabId = args.tabId ? assertOwned(args.tabId) : resolveOwnedTab();
+        tabId = args.tabId ? targetTab(args.tabId) : targetTab(undefined);
       } catch (error) {
         return { text: error.message, isError: true };
       }
@@ -612,12 +700,13 @@ async function callTool(name, args = {}, requestId) {
     case "raw_close": {
       let tabId;
       try {
-        tabId = args.tabId ? assertOwned(args.tabId) : resolveOwnedTab();
+        tabId = args.tabId ? assertClosable(args.tabId, args.force) : targetTab(undefined);
       } catch (error) {
         return { text: error.message, isError: true };
       }
       const result = await runRaw(["close", tabId], DEFAULT_TIMEOUT, requestId);
-      releaseTab(ownerLabel, tabId, { file: registryFile() });
+      // A forced close of another agent's tab forgets it for that agent too.
+      forgetTab(tabId, { file: registryFile() });
       if (currentTabId === tabId) currentTabId = ownedTabs()[0] ?? null;
       if (!result.ok) {
         return {
@@ -631,61 +720,66 @@ async function callTool(name, args = {}, requestId) {
       };
     }
     case "raw_text": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["text"];
       if (tabId) argv.push(String(tabId));
       if (args.selector) argv.push(String(args.selector));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
-      return { text: asText(result.value ?? result.text), isError: !result.ok };
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
     }
     case "raw_html": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["html"];
       if (tabId) argv.push(String(tabId));
       if (args.selector) argv.push(String(args.selector));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
-      return { text: asText(result.value ?? result.text, 50_000), isError: !result.ok };
+      return { text: withNote(asText(result.value ?? result.text, 50_000), tabId), isError: !result.ok };
     }
     case "raw_eval": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["eval"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.expression ?? ""));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
-      return { text: asText(result.value ?? result.text), isError: !result.ok };
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
     }
     case "raw_snapshot": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["snapshot"];
       if (tabId) argv.push(String(tabId));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
       const value = result.value;
       const text = value && typeof value === "object" && value.snapshot !== undefined ? value.snapshot : asText(value ?? result.text);
-      return { text: asText(text, 30_000), isError: !result.ok };
+      return { text: withNote(asText(text, 30_000), tabId), isError: !result.ok };
     }
     case "raw_click": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["click"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.selector));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
-      return { text: asText(result.value ?? result.text), isError: !result.ok };
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
     }
     case "raw_fill": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["fill"];
       if (tabId) argv.push(String(tabId));
       argv.push(String(args.selector), String(args.value ?? ""));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
-      return { text: asText(result.value ?? result.text), isError: !result.ok };
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
     }
     case "raw_visit": {
+      try {
+        checkOrigin(args.url);
+      } catch (error) {
+        return { text: error.message, isError: true };
+      }
       const argv = ["visit", String(args.url), String(args.expression ?? ""), String(args.waitMs ?? "")];
       const result = await runRaw(argv, Math.max(DEFAULT_TIMEOUT, 90_000), requestId);
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_screenshot": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["screenshot"];
       if (tabId) argv.push(String(tabId));
       if (args.out) argv.push(String(args.out));
@@ -704,7 +798,7 @@ async function callTool(name, args = {}, requestId) {
         }
         const data = fs.readFileSync(saved).toString("base64");
         return {
-          text: `screenshot: ${saved}`,
+          text: withNote(`screenshot: ${saved}`, tabId),
           image: { type: "image", data, mimeType: "image/png" },
           isError: false,
         };
@@ -712,7 +806,7 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: false };
     }
     case "raw_cookies": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["cookies"];
       if (tabId) argv.push(String(tabId));
       if (args.domain) argv.push(String(args.domain));
@@ -720,11 +814,11 @@ async function callTool(name, args = {}, requestId) {
       return { text: asText(result.value ?? result.text), isError: !result.ok };
     }
     case "raw_frames": {
-      const tabId = resolveOwnedTab(args.tabId);
+      const tabId = targetTab(args.tabId);
       const argv = ["frames"];
       if (tabId) argv.push(String(tabId));
       const result = await runRaw(argv, DEFAULT_TIMEOUT, requestId);
-      return { text: asText(result.value ?? result.text), isError: !result.ok };
+      return { text: withNote(asText(result.value ?? result.text), tabId), isError: !result.ok };
     }
     case "raw_call": {
       const argv = ["call", String(args.method), JSON.stringify(args.params ?? {})];
@@ -854,7 +948,37 @@ async function callTool(name, args = {}, requestId) {
           if (!task) return { text: `task not found: ${taskId}`, isError: true };
           if (!task.contract_spec) return { text: `task ${taskId} has no contract_spec`, isError: true };
           const contract = typeof task.contract_spec === "string" ? JSON.parse(task.contract_spec) : task.contract_spec;
-          const verdict = await runContract(contract, p.cwd ? String(p.cwd) : process.cwd());
+          let verdict = await runContract(contract, p.cwd ? String(p.cwd) : process.cwd());
+          // Evidence: a verdict is stronger with the page it was checked against.
+          try {
+            const evidenceTab = p.tabId
+              ? targetTab(p.tabId)
+              : (ownedTabs().find((id) => id === currentTabId) ?? ownedTabs()[0] ?? null);
+            if (evidenceTab) {
+              const evidenceDir = path.join(path.dirname(registryFile()), "evidence");
+              fs.mkdirSync(evidenceDir, { recursive: true });
+              const shotPath = path.join(evidenceDir, `${task.task_id}.png`);
+              const shot = await runRaw(["screenshot", String(evidenceTab), shotPath], 30_000);
+              const page = await runRaw(
+                ["eval", String(evidenceTab), "({ url: location.href, title: document.title })"],
+                15_000,
+              );
+              const evidence = {};
+              if (shot.ok && typeof shot.value?.saved === "string") evidence.screenshot = shot.value.saved;
+              if (page.ok && page.value && typeof page.value === "object") {
+                if (typeof page.value.url === "string") evidence.url = page.value.url;
+                if (typeof page.value.title === "string") evidence.title = page.value.title;
+              }
+              if (Object.keys(evidence).length > 0) {
+                verdict = {
+                  ...verdict,
+                  evidence: { ...evidence, tabId: String(evidenceTab), capturedAt: Date.now() },
+                };
+              }
+            }
+          } catch {
+            /* evidence is best effort; it must never turn a verdict into an error */
+          }
           bb.updateTaskStatus(task.task_id, verdict.verdict === "verified" ? "completed" : "failed", verdict);
           return { text: JSON.stringify(verdict, null, 2), isError: verdict.verdict !== "verified" };
         }
@@ -991,9 +1115,12 @@ async function handle(message) {
     if (LOCAL_TOOLS.has(name)) {
       // Local tools talk to SQLite/tmux only, so they must not wait
       // behind a slow browser command (and a wedged one must not block them).
+      // A verification contract can legitimately outlast the generic local cap.
+      const isVerify = name === "raw_task" && String(args?.action) === "verify";
+      const budget = isVerify ? Math.max(LOCAL_TOOL_TIMEOUT_MS, VERIFY_MAX_MS) : LOCAL_TOOL_TIMEOUT_MS;
       const timer = setTimeout(
-        () => respond({ content: [{ type: "text", text: `${name} timed out after ${LOCAL_TOOL_TIMEOUT_MS}ms` }], isError: true }),
-        LOCAL_TOOL_TIMEOUT_MS,
+        () => respond({ content: [{ type: "text", text: `${name} timed out after ${budget}ms` }], isError: true }),
+        budget,
       );
       timer.unref?.();
       run().finally(() => clearTimeout(timer));

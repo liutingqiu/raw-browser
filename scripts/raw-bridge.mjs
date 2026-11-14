@@ -54,6 +54,9 @@ const config = readConfig();
 const base = `http://127.0.0.1:${config.port}`;
 const authHeaders = { "X-Raw-Bridge-Token": config.token };
 const bridgeName = isChromeTarget ? "Chrome" : "Edge";
+/** Agent tabs open behind the human's, so focus never jumps. */
+const BACKGROUND = process.env.RAW_TAB_BACKGROUND === "1";
+const tabActiveHeader = { "X-Raw-Tab-Active": BACKGROUND ? "0" : "1" };
 const installHint =
   `node scripts/install-edge-bridge.mjs --browser ${isChromeTarget ? "chrome" : "edge"}`;
 
@@ -65,6 +68,9 @@ const installHint =
 function normalizeUrl(value) {
   const url = String(value ?? "").trim();
   if (!url) return "about:blank";
+  if (url.startsWith("//")) return `https:${url}`;
+  // A host:port pair is not a scheme, even though "localhost:" looks like one.
+  if (/^[a-z][a-z0-9+.-]*:\d+(?:[/?#]|$)/i.test(url)) return `https://${url}`;
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
   return `https://${url}`;
 }
@@ -309,7 +315,7 @@ const commands = {
     const url = normalizeUrl(rawUrl);
     // Open blank and navigate afterwards: creating the tab at the target URL
     // races the first evaluate ("Execution context was destroyed").
-    const target = await http("/json/new?about%3Ablank", { method: "PUT" });
+    const target = await http("/json/new?about%3Ablank", { method: "PUT", headers: tabActiveHeader });
     const id = String(target.id);
     if (url && url !== "about:blank") {
       await withPage(id, async (channel) => {
@@ -445,7 +451,7 @@ const commands = {
   /** open a throwaway tab, navigate, read, and close it in one attach */
   async visit(rawUrl, expression, waitArg) {
     const url = normalizeUrl(rawUrl);
-    const created = await http("/json/new?about%3Ablank", { method: "PUT" });
+    const created = await http("/json/new?about%3Ablank", { method: "PUT", headers: tabActiveHeader });
     const id = String(created.id);
     try {
       const page = await withPage(id, async (channel) => {
