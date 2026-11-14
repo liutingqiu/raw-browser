@@ -362,6 +362,12 @@ raw-browser 的 API 和产品思路参考了这些先行者：
 raw-browser 是直接基于 Chrome DevTools Protocol 的独立实现，没有把上面任何一个
 列为依赖。
 
+## 贡献者
+
+- **[@liutingqiu](https://github.com/liutingqiu)** —— 作者与维护者。
+- **[@sshanersshaner](https://github.com/sshanersshaner)** —— 0.9.0 的点阵波
+  光效与指针缓动（扩展的活动层）。
+
 ## 开源许可
 
 [MIT](LICENSE)

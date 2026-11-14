@@ -396,6 +396,12 @@ raw-browser's API and product ideas were informed by prior work:
 raw-browser is an independent implementation built directly on the Chrome
 DevTools Protocol. It does not list either project as a dependency.
 
+## Contributors
+
+- **[@liutingqiu](https://github.com/liutingqiu)** — author and maintainer.
+- **[@sshanersshaner](https://github.com/sshanersshaner)** — the wave-lit dot
+  field and the eased agent pointer in 0.9.0 (the extension's activity layer).
+
 ## License
 
 [MIT](LICENSE)
