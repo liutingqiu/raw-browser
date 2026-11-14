@@ -55,45 +55,31 @@
   const AGENT_GLOW_ID = "raw-agent-glow";
   const AGENT_GLOW_IDLE_MS = 12_000;
   const AGENT_GLOW_CSS = `
-#raw-agent-glow {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 2147483647;
-  border: 4px solid transparent;
-  border-image: linear-gradient(125deg, #5b86ff 0%, #a17bff 35%, #8fe0ff 65%, #5b86ff 100%) 1;
-  box-shadow:
-    inset 0 0 0 1px rgba(160, 195, 255, .90),
-    inset 0 0 28px rgba(90, 140, 255, .65),
-    inset 0 0 90px rgba(125, 95, 255, .35);
-  animation: raw-agent-glow-breathe 3.8s ease-in-out infinite;
-  opacity: 1;
-  transition: opacity .45s ease;
-}
-#raw-agent-glow.raw-glow-out {
-  opacity: 0;
-  animation: none;
-}
-#raw-agent-glow::after {
-  content: attr(data-owner);
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(13, 15, 19, .82);
-  color: #dfe8ff;
-  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .04em;
-  border: 1px solid rgba(140, 175, 255, .45);
-  box-shadow: 0 0 22px rgba(90, 140, 255, .45);
-  backdrop-filter: blur(8px);
-}
-@keyframes raw-agent-glow-breathe {
-  0%, 100% { opacity: .55; }
-  50% { opacity: .95; }
-}
+  .raw-dot-layer{
+    position:fixed; inset:0; z-index:2147483647; pointer-events:none;
+    opacity:0; transition:opacity .45s ease;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  .raw-dot-layer.raw-dot-on{opacity:1}
+  .raw-dot-layer.raw-glow-out{opacity:0}
+  .raw-dot-layer .raw-dot-canvas{display:block;width:100%;height:100%}
+  .raw-dot-layer .raw-dot-label{
+    position:absolute;left:50%;bottom:24px;transform:translateX(-50%);
+    padding:7px 13px;border-radius:999px;
+    background:rgba(13,15,19,.82);color:#dfe8ff;
+    font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:.04em;white-space:nowrap;
+    border:1px solid rgba(140,175,255,.45);
+    box-shadow:0 0 22px rgba(90,140,255,.45);
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+    animation:raw-dot-label-pulse 1.6s ease-in-out infinite;
+  }
+  .raw-dot-layer .raw-dot-label::before{
+    content:"";display:inline-block;width:6px;height:6px;margin-right:7px;
+    border-radius:50%;background:#8fb0ff;box-shadow:0 0 10px #8fb0ff;
+    animation:raw-dot-label-pulse 1.6s ease-in-out infinite;vertical-align:1px;
+  }
+  @keyframes raw-dot-label-pulse{0%,100%{opacity:.62}50%{opacity:1}}
 #raw-agent-cursor {
   position: fixed;
   left: 0;
@@ -138,31 +124,189 @@
   // Injected into the page with chrome.scripting.executeScript, so it must be
   // self-contained: no references to extension-scope helpers.
   function agentGlowShow(id, idleMs, owner) {
+    const KEY = "__rawAgentDots";
     // The driving runtime may publish its identity on the page; fall back to a
-    // generic label so a human still sees that the tab is being driven.
-    // The isolated world cannot read page variables, so the runtime's identity
-    // travels as a DOM attribute written by rawSyncOwnerAttr (MAIN world).
+    // generic label so a human still sees that the tab is being driven. The
+    // isolated world cannot read page variables, so the identity travels as a
+    // DOM attribute written by rawSyncOwnerAttr (MAIN world).
     const fromAttr = document.documentElement && document.documentElement.getAttribute("data-raw-owner");
-    const label = String(fromAttr || (window.__rawOwner && window.__rawOwner.label) || owner || "").trim() || "raw controlling";
-    const remove = (node) => {
-      clearTimeout(node.__rawGlowTimer);
-      node.classList.add("raw-glow-out");
-      setTimeout(() => node.remove(), 450);
-    };
-    const existing = document.getElementById(id);
-    if (existing) {
-      existing.dataset.owner = label;
-      existing.classList.remove("raw-glow-out");
-      clearTimeout(existing.__rawGlowTimer);
-      existing.__rawGlowTimer = setTimeout(() => remove(existing), idleMs);
+    const badgeText = String(fromAttr || (window.__rawOwner && window.__rawOwner.label) || owner || "").trim() || "raw controlling";
+    const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+    const prior = window[KEY];
+    if (prior && prior.node && prior.node.isConnected && prior.node.id === id) {
+      prior.node.dataset.owner = badgeText;
+      const priorBadge = prior.node.querySelector(".raw-dot-label");
+      if (priorBadge) priorBadge.textContent = badgeText;
+      prior.touch();
       return;
     }
+
     const node = document.createElement("div");
     node.id = id;
-    node.className = "raw-glow";
-    node.dataset.owner = label;
-    node.__rawGlowTimer = setTimeout(() => remove(node), idleMs);
-    (document.documentElement ?? document.body).appendChild(node);
+    node.className = "raw-dot-layer";
+    const canvas = document.createElement("canvas");
+    canvas.className = "raw-dot-canvas";
+    const badge = document.createElement("span");
+    badge.className = "raw-dot-label";
+    badge.textContent = badgeText;
+    node.dataset.owner = badgeText;
+    node.appendChild(canvas);
+    node.appendChild(badge);
+    (document.documentElement || document.body).appendChild(node);
+    requestAnimationFrame(() => node.classList.add("raw-dot-on"));
+
+    const isDark = typeof window.__rawForceDark === "boolean" ? window.__rawForceDark : (() => {
+      const el = document.body || document.documentElement;
+      const bg = getComputedStyle(el).backgroundColor || "";
+      const m = /rgba?\(([^)]+)\)/.exec(bg);
+      if (!m) return matchMedia("(prefers-color-scheme: dark)").matches;
+      const parts = m[1].split(",").map(Number);
+      const [r, g, b] = parts;
+      const a = parts.length > 3 ? parts[3] : 1;
+      if (!a) return matchMedia("(prefers-color-scheme: dark)").matches;
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128;
+    })();
+
+    const ctx = canvas.getContext("2d");
+    const hotRGB = isDark ? [196, 214, 255] : [36, 50, 78];
+    const baseAlpha = 0;
+    const hotAlpha = 0.95;
+
+    const ALPHA_STEPS = 6;
+    const THRESHOLD = 0.04;
+
+    let w = 0;
+    let h = 0;
+    let dpr = 1;
+    let spacing = 16;
+    let dots = [];
+    let raf = 0;
+    let idle = 0;
+    let stopped = false;
+    let dotR = 1.2;
+    let omega = 0.1;
+
+    const layout = () => {
+      w = node.clientWidth || window.innerWidth;
+      h = node.clientHeight || window.innerHeight;
+      dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // dense field: 0.75x the previous gap
+      spacing = clamp(Math.sqrt((w * h) / 3600) * 0.964, 16.5, 22);
+      const cols = Math.ceil(w / spacing) + 1;
+      const rows = Math.ceil(h / spacing) + 1;
+      const padX = (w - (cols - 1) * spacing) / 2;
+      const padY = (h - (rows - 1) * spacing) / 2;
+      // one fixed dot size: the wave only changes brightness now
+      dotR = Math.max(0.9, spacing * 0.055);
+
+      // long wavelength: a few broad, slow crests instead of tight rings
+      const wavelength = Math.max(240, Math.min(w, h) * 0.42);
+      const travel = Math.min(w, h) * 0.17 * 0.67; // px per second (0.67x the previous pace)
+      omega = (travel / wavelength) * 6.2832;
+      const k = 6.2832 / wavelength;
+      // the source is a circle, not a point: radius is half a period and its
+      // centre sits one whole period below the middle of the screen
+      const srcX = w / 2;
+      const srcR = wavelength / 2;
+      // the centre stays below the viewport: the visible part is only the top
+      // arc of the source circle, tangent to the bottom edge
+      const srcY = h + srcR;
+      const rimFade = Math.max(18, wavelength * 0.05);
+      let maxReach = 1;
+      for (let cy2 = 0; cy2 <= h; cy2 += h / 2) {
+        for (let cx2 = 0; cx2 <= w; cx2 += w / 2) {
+          maxReach = Math.max(maxReach, Math.hypot(cx2 - srcX, cy2 - srcY) - srcR);
+        }
+      }
+
+      dots = [];
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const px = padX + x * spacing;
+          const py = padY + y * spacing;
+          const dist = Math.sqrt((px - srcX) * (px - srcX) + (py - srcY) * (py - srcY));
+          const away = dist - srcR; // distance travelled from the circle rim
+          const inside = away <= 0;
+          const envelope = inside ? 0 : Math.pow(1 - clamp(away / maxReach, 0, 1), 0.75);
+          const rim = inside ? 0 : clamp(away / rimFade, 0, 1);
+          dots.push({ x: px, y: py, env: envelope * rim, phase: inside ? 0 : away * k });
+        }
+      }
+
+    };
+
+    const draw = (ts) => {
+      if (stopped) return;
+      const time = ts * 0.001;
+      const paths = new Array(ALPHA_STEPS);
+      for (let i = 0; i < ALPHA_STEPS; i++) paths[i] = new Path2D();
+
+      for (let i = 0; i < dots.length; i++) {
+        const d = dots[i];
+        const s = 0.5 + 0.5 * Math.cos(d.phase - time * omega);
+        // same lit band as before (support starts where s^2 used to cross the
+        // threshold), but a linear ramp that saturates fast: the edges fade
+        // quickly while the number of lit dots stays put
+        const ramp = (s - 0.1765) * 1.7;
+        const power = (ramp > 1 ? 1 : ramp < 0 ? 0 : ramp) * d.env;
+        if (power <= THRESHOLD) continue;
+        const step = Math.min(ALPHA_STEPS - 1, (power * ALPHA_STEPS) | 0);
+        const path = paths[step];
+        path.moveTo(d.x + dotR, d.y);
+        path.arc(d.x, d.y, dotR, 0, 6.2832);
+      }
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = "rgb(" + hotRGB[0] + "," + hotRGB[1] + "," + hotRGB[2] + ")";
+      // brighter buckets sit on top so overlaps resolve toward the crest
+      for (let a = 0; a < ALPHA_STEPS; a++) {
+        ctx.globalAlpha = baseAlpha + (hotAlpha - baseAlpha) * ((a + 0.5) / ALPHA_STEPS);
+        ctx.fill(paths[a]);
+      }
+      ctx.globalAlpha = 1;
+      raf = requestAnimationFrame(draw);
+    };
+
+    const api = {
+      node,
+      touch() {
+        clearTimeout(idle);
+        node.classList.remove("raw-glow-out");
+        idle = setTimeout(api.stop, idleMs);
+      },
+      stop() {
+        if (stopped) return;
+        stopped = true;
+        clearTimeout(idle);
+        cancelAnimationFrame(raf);
+        window.removeEventListener("resize", layout);
+        document.removeEventListener("visibilitychange", onHide);
+        node.classList.add("raw-glow-out");
+        setTimeout(() => node.remove(), 450);
+        if (window[KEY] === api) delete window[KEY];
+      },
+    };
+
+    const onHide = () => {
+      if (document.hidden) cancelAnimationFrame(raf);
+      else if (!stopped) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(draw);
+      }
+    };
+
+    window[KEY] = api;
+    window.addEventListener("resize", layout);
+    document.addEventListener("visibilitychange", onHide);
+
+    layout();
+    raf = requestAnimationFrame(draw);
+    api.touch();
   }
 
   // Agent pointer: drawn where the driving agent actually dispatched a mouse
@@ -207,9 +351,11 @@
   }
 
   function agentGlowHide(id) {
+    const KEY = "__rawAgentDots";
+    const state = window[KEY];
+    if (state && state.node && state.node.id === id) { state.stop(); return; }
     const node = document.getElementById(id);
     if (!node) return;
-    clearTimeout(node.__rawGlowTimer);
     node.classList.add("raw-glow-out");
     setTimeout(() => node.remove(), 450);
   }
