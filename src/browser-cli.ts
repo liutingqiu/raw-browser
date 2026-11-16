@@ -31,6 +31,8 @@ Options:
 
 The profile config at ~/.raw/browser-profiles/current.json selects direct CDP
 mode or an extension bridge (mode "edge-extension" / "chrome-extension").
+When several profiles are connected, set "account" there to the email or
+profile id that raw should drive.
 `;
 
 function takeValue(args: string[], index: number, option: string): string {
@@ -56,6 +58,9 @@ try {
   if (current.mode === "edge-extension") bridgeBrowser = "edge";
   else if (current.mode === "chrome-extension") bridgeBrowser = "chrome";
   else if (current.mode === "extension") bridgeBrowser = current.browser === "chrome" ? "chrome" : "edge";
+  if (typeof current.account === "string" && current.account.trim()) {
+    process.env.RAW_BROWSER_ACCOUNT ??= current.account.trim();
+  }
 } catch (error: any) {
   if (error?.code !== "ENOENT") {
     process.stderr.write(`raw: invalid browser profile config ${browserProfileConfig}: ${error.message}\n`);
@@ -121,6 +126,7 @@ if (command === "help" || args.includes("-h") || args.includes("--help")) {
       process.stderr.write("raw: --headless is ignored in extension bridge mode; that browser is already running.\n");
     }
 
+    if (command === "status") process.env.RAW_BROWSER_STATUS = "1";
     const runtime = await import("./browser.ts");
     if (command === "status") {
       process.stdout.write(`${await runtime.browserStatus()}\n`);

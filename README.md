@@ -176,8 +176,10 @@ Select the bridge in `~/.raw/browser-profiles/current.json`:
 { "mode": "edge-extension" }
 ```
 
-or `{ "mode": "chrome-extension" }`. `raw status` prints the selected bridge,
-port and extension version. If the bridge does not connect after an upgrade,
+or `{ "mode": "chrome-extension" }`. When several profiles are connected,
+add `"account": "you@gmail.com"` (the address `raw status` prints) so `raw`
+drives that profile. `raw status` prints the selected bridge, port and
+extension version. If the bridge does not connect after an upgrade,
 restart the browser once: it caches the native-messaging host path for the life
 of the process. Upgrading from an older installer? Restart the browser, then run
 the installer once with `--clean-legacy-hosts` (`-CleanLegacyHosts` in

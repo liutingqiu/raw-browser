@@ -73,25 +73,17 @@ if (string.IsNullOrWhiteSpace(token))
     Log($"config {configPath} has no token");
     return 2;
 }
-var port = config?["port"]?.GetValue<int>() ?? defaultPort;
-
-// Reloading the extension starts a fresh host while the previous instance can
-// still be holding the port. Only retire hosts for the same browser: the Edge
-// and Chrome builds have different process names so they never kill each other.
+var configuredPort = config?["port"]?.GetValue<int>() ?? defaultPort;
+var sessionsPath = Path.Combine(rawHome, $"{browserKind}-sessions.json");
+// Each Chrome/Edge profile launches its own host. A new host used to kill every
+// sibling, so four signed-in profiles took turns owning the one port. Claim a
+// free port instead, and retire only the previous host of the same profile.
+var port = Console.IsInputRedirected
+    ? SessionTable.Claim(sessionsPath, configuredPort, Log)
+    : configuredPort;
 if (Console.IsInputRedirected)
 {
-    try
-    {
-        foreach (var stale in Process.GetProcessesByName(processName))
-        {
-            if (stale.Id == Environment.ProcessId) continue;
-            try { stale.Kill(); stale.WaitForExit(2000); } catch { /* already gone */ }
-        }
-    }
-    catch
-    {
-        // Process enumeration is best-effort; macOS and Linux may restrict it.
-    }
+    AppDomain.CurrentDomain.ProcessExit += (_, _) => SessionTable.Release(sessionsPath, Environment.ProcessId);
 }
 
 // A retired instance releases the listening socket asynchronously. Binding too
@@ -141,6 +133,8 @@ app.MapGet("/json/version", (HttpContext context) =>
         ["Browser"] = browserName,
         ["Protocol-Version"] = "1.3",
         ["Raw-Extension-Version"] = native.ExtensionVersion,
+        ["Raw-Profile-Id"] = native.ProfileId ?? "",
+        ["Raw-Account"] = native.AccountEmail ?? "",
         ["User-Agent"] = native.ExtensionUserAgent ?? "",
         ["V8-Version"] = "",
         ["WebKit-Version"] = "",
@@ -245,6 +239,10 @@ async Task HandleBrowserWebSocket(HttpContext context)
 app.Map("/devtools/browser/raw-edge", HandleBrowserWebSocket);
 app.Map("/devtools/browser/raw-chrome", HandleBrowserWebSocket);
 
+if (Console.IsInputRedirected)
+{
+    native.OnHello = message => SessionTable.NoteHello(sessionsPath, Environment.ProcessId, message, Log);
+}
 var readTask = Task.Run(async () =>
 {
     try { await native.ReadLoopAsync(); }
@@ -386,6 +384,9 @@ sealed class NativeChannel(Stream input, Stream output, Action<string> log)
     public string? ExtensionVersion { get; private set; }
     public string? ExtensionUserAgent { get; private set; }
     public string? ExtensionProtocol { get; private set; }
+    public string? ProfileId { get; private set; }
+    public string? AccountEmail { get; private set; }
+    public Action<JsonObject>? OnHello { get; set; }
 
     public Guid AddPageSocket(string tabId, WebSocket socket) => Add(pageSockets, new SocketRegistration(tabId, socket));
     public void RemovePageSocket(Guid id) => Remove(pageSockets, id);
@@ -572,11 +573,20 @@ sealed class NativeChannel(Stream input, Stream output, Action<string> log)
                 ExtensionVersion = message["version"]?.GetValue<string>();
                 ExtensionUserAgent = message["userAgent"]?.GetValue<string>();
                 ExtensionProtocol = message["protocolVersion"]?.GetValue<string>();
-                log($"extension hello version={ExtensionVersion} protocol={ExtensionProtocol}");
+                ProfileId = message["profileId"]?.GetValue<string>();
+                AccountEmail = message["email"]?.GetValue<string>();
+                if (string.IsNullOrEmpty(AccountEmail))
+                {
+                    AccountEmail = SessionTable.LookupChromeEmail(ProfileId);
+                    if (!string.IsNullOrEmpty(AccountEmail)) message["email"] = AccountEmail;
+                }
+                log($"extension hello version={ExtensionVersion} protocol={ExtensionProtocol} profile={ProfileId} account={AccountEmail}");
                 if (!string.IsNullOrEmpty(ExtensionProtocol) && ExtensionProtocol != "1")
                 {
                     log($"extension protocol {ExtensionProtocol} differs from host protocol 1");
                 }
+                try { OnHello?.Invoke(message); }
+                catch (Exception error) { log($"session update failed: {error.Message}"); }
             } else if (kind == "response") {
                 var requestId = message["requestId"]?.GetValue<string>();
                 if (requestId is not null && pending.TryRemove(requestId, out var completion)) {
@@ -643,5 +653,233 @@ sealed class NativeChannel(Stream input, Stream output, Action<string> log)
             offset += count;
         }
         return true;
+    }
+}
+
+/// One host process per browser profile. The registry is the list `raw` uses
+/// to tell those profiles apart; dead pids are dropped on the next claim.
+static class SessionTable
+{
+    const int PortSpan = 16;
+    static readonly object Gate = new();
+
+    sealed record Session(int Pid, int Port, string ProfileId, string Email, string Version, string StartedAt);
+
+    public static int Claim(string path, int basePort, Action<string> log)
+    {
+        var chosen = -1;
+        WithLock(path, () =>
+        {
+            var sessions = Load(path).Where(s => IsAlive(s.Pid)).ToList();
+            var used = sessions.Select(s => s.Port).ToHashSet();
+            var port = -1;
+            for (var candidate = basePort; candidate < basePort + PortSpan; candidate++)
+            {
+                if (used.Contains(candidate) || !CanBind(candidate)) continue;
+                port = candidate;
+                break;
+            }
+            if (port < 0) throw new InvalidOperationException($"no free bridge port in {basePort}..{basePort + PortSpan - 1}");
+            sessions.Add(new Session(Environment.ProcessId, port, "", "", "", DateTimeOffset.Now.ToString("O")));
+            Save(path, sessions);
+            log($"session pid={Environment.ProcessId} port={port}");
+            chosen = port;
+        });
+        return chosen;
+    }
+
+    public static void NoteHello(string path, int pid, JsonObject message, Action<string> log)
+    {
+        var profileId = message["profileId"]?.GetValue<string>() ?? "";
+        var email = message["email"]?.GetValue<string>() ?? "";
+        var version = message["version"]?.GetValue<string>() ?? "";
+        WithLock(path, () =>
+        {
+            var sessions = Load(path).Where(s => IsAlive(s.Pid) || s.Pid == pid).ToList();
+            if (profileId.Length > 0)
+            {
+                foreach (var previous in sessions.Where(s => s.ProfileId == profileId && s.Pid != pid).ToList())
+                {
+                    TryKill(previous.Pid);
+                    sessions.Remove(previous);
+                    log($"retired pid={previous.Pid} for profile {profileId}");
+                }
+            }
+            var index = sessions.FindIndex(s => s.Pid == pid);
+            var current = index >= 0 ? sessions[index] : new Session(pid, 0, "", "", "", DateTimeOffset.Now.ToString("O"));
+            current = current with { ProfileId = profileId, Email = email, Version = version };
+            if (index >= 0) sessions[index] = current;
+            else sessions.Add(current);
+            Save(path, sessions);
+        });
+    }
+
+    public static void Release(string path, int pid)
+    {
+        WithLock(path, () =>
+        {
+            var sessions = Load(path).Where(s => s.Pid != pid).ToList();
+            Save(path, sessions);
+        });
+    }
+
+    /// Cross-process lock. Four profiles launch a host at the same moment, and
+    /// an in-process lock cannot keep them from claiming the same port.
+    static void WithLock(string path, Action action)
+    {
+        lock (Gate)
+        {
+            var lockPath = path + ".lock";
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            for (var attempt = 0; attempt < 100; attempt++)
+            {
+                try
+                {
+                    using var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    action();
+                    return;
+                }
+                catch (IOException) when (attempt < 99)
+                {
+                    Thread.Sleep(20);
+                }
+            }
+            throw new IOException($"could not lock {lockPath}");
+        }
+    }
+
+    static List<Session> Load(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return [];
+            var root = JsonNode.Parse(File.ReadAllText(path))?.AsObject();
+            var list = new List<Session>();
+            foreach (var item in root?["sessions"]?.AsArray() ?? [])
+            {
+                if (item is null) continue;
+                list.Add(new Session(
+                    item["pid"]?.GetValue<int>() ?? 0,
+                    item["port"]?.GetValue<int>() ?? 0,
+                    item["profileId"]?.GetValue<string>() ?? "",
+                    item["email"]?.GetValue<string>() ?? "",
+                    item["version"]?.GetValue<string>() ?? "",
+                    item["startedAt"]?.GetValue<string>() ?? ""));
+            }
+            return list;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    static void Save(string path, List<Session> sessions)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var array = new JsonArray();
+        foreach (var session in sessions)
+        {
+            array.Add(new JsonObject
+            {
+                ["pid"] = session.Pid,
+                ["port"] = session.Port,
+                ["profileId"] = session.ProfileId,
+                ["email"] = session.Email,
+                ["version"] = session.Version,
+                ["startedAt"] = session.StartedAt,
+            });
+        }
+        var tmp = $"{path}.{Environment.ProcessId}.tmp";
+        File.WriteAllText(tmp, new JsonObject { ["sessions"] = array }.ToJsonString());
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    /// Chrome does not tell a native host which profile launched it. The
+    /// extension stores its own id per profile; the profile picker name is the
+    /// address shown in Chrome's Local State.
+    public static string LookupChromeEmail(string? profileId)
+    {
+        if (string.IsNullOrEmpty(profileId)) return "";
+        try
+        {
+            var chrome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "google-chrome");
+            var localState = Path.Combine(chrome, "Local State");
+            if (!File.Exists(localState)) return "";
+            var info = JsonNode.Parse(File.ReadAllText(localState))?["profile"]?["info_cache"]?.AsObject();
+            if (info is null) return "";
+            foreach (var profile in info)
+            {
+                var folder = Path.Combine(chrome, profile.Key, "Local Extension Settings", "gfpadofoapicldopjkghnfbnbkljihmk");
+                if (!Directory.Exists(folder)) continue;
+                var found = false;
+                foreach (var file in Directory.EnumerateFiles(folder))
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(file);
+                        if (Encoding.UTF8.GetString(bytes).Contains(profileId, StringComparison.Ordinal))
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        /* the database may be locked; another file can still match */
+                    }
+                }
+                if (!found) continue;
+                return profile.Value?["user_name"]?.GetValue<string>() ?? "";
+            }
+        }
+        catch
+        {
+            /* a missing profile label still leaves the profile id */
+        }
+        return "";
+    }
+
+    static bool IsAlive(int pid)
+    {
+        if (pid <= 0) return false;
+        try
+        {
+            var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool CanBind(int port)
+    {
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+        try
+        {
+            probe.Start();
+            probe.Stop();
+            return true;
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            return false;
+        }
+    }
+
+    static void TryKill(int pid)
+    {
+        try
+        {
+            var process = Process.GetProcessById(pid);
+            process.Kill();
+            process.WaitForExit(2000);
+        }
+        catch
+        {
+            /* already gone */
+        }
     }
 }

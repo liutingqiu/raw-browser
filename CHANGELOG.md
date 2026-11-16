@@ -3,6 +3,29 @@
 All notable changes to `raw` are documented here. The format follows Keep a Changelog and versions
 follow Semantic Versioning.
 
+## [Unreleased]
+
+### Fixed
+
+- **One bridge host per signed-in profile.** A newly started host used to kill
+  every other host with the same name, so several Chrome or Edge profiles took
+  turns owning the single bridge port and the extension hello flooded the log.
+  Each profile now keeps its own host. Chrome ports start at 9334 and Edge
+  ports at 9333, with sixteen ports available. A reconnect retires only the
+  previous host of that same profile.
+
+### Added
+
+- The extension hello carries a stable per-profile id. The host writes
+  `~/.raw/chrome-sessions.json` or `~/.raw/edge-sessions.json` with the profile
+  id, port, and account address. On Chrome the address comes from the profile
+  picker when the hello does not include one.
+- `"account"` in `~/.raw/browser-profiles/current.json` (or
+  `RAW_BROWSER_ACCOUNT`) selects which live profile `raw` drives. The value is
+  the email or the profile id. `raw status` lists every connected profile.
+  With more than one profile and no account selected, `raw run` stops and
+  prints the list instead of attaching to an arbitrary one.
+
 ## [0.9.0] - 2026-11-14
 
 The browser-native release: per-agent tabs that never steal the human's focus,

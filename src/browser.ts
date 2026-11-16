@@ -52,10 +52,54 @@ const BRIDGE_CONFIG = EXTERNAL_BRIDGE
   ? readBridgeConfig(CONFIG_DIR, process.env.RAW_BRIDGE_CONFIG || BRIDGE_CONFIG_FILE)
   : {};
 const BRIDGE_TOKEN = process.env.RAW_BROWSER_BRIDGE_TOKEN ?? BRIDGE_CONFIG.token;
-/** The native host binds this fixed port in extension mode. */
+/** Base port. Each signed-in profile claims the next free port above it. */
 const BRIDGE_PORT = BRIDGE_CONFIG.port ?? (BRIDGE_BROWSER === "chrome" ? 9334 : 9333);
 const configuredPort = process.env.RAW_BROWSER_PORT;
-const PORT = configuredPort === undefined ? (EXTERNAL_BRIDGE ? BRIDGE_PORT : 9222) : Number(configuredPort);
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type BridgeSession = { pid: number; port: number; profileId?: string; email?: string };
+
+function readLiveSessions(browser: string): BridgeSession[] {
+  try {
+    const file = path.join(CONFIG_DIR, `${browser}-sessions.json`);
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { sessions?: BridgeSession[] };
+    return (parsed.sessions ?? []).filter((session) =>
+      Number.isInteger(session?.pid) && Number.isInteger(session?.port) && pidAlive(session.pid));
+  } catch {
+    return [];
+  }
+}
+
+function resolveExternalPort(fallback: number): number {
+  if (configuredPort !== undefined) return Number(configuredPort);
+  const sessions = readLiveSessions(BRIDGE_BROWSER);
+  const wanted = process.env.RAW_BROWSER_ACCOUNT?.trim();
+  if (wanted) {
+    const match = sessions.find((session) => session.email === wanted || session.profileId === wanted);
+    if (!match) {
+      const known = sessions.map((session) => session.email || session.profileId || `port ${session.port}`).join(", ") || "none";
+      throw new Error(`no ${BRIDGE_BROWSER} bridge for account "${wanted}". Live sessions: ${known}`);
+    }
+    return match.port;
+  }
+  if (sessions.length <= 1 || process.env.RAW_BROWSER_STATUS === "1") return sessions[0]?.port ?? fallback;
+  const known = sessions.map((session) => `${session.email || session.profileId || "unknown"} on ${session.port}`).join(", ");
+  throw new Error(
+    `multiple ${BRIDGE_BROWSER} profiles are connected (${known}). Set "account" in ~/.raw/browser-profiles/current.json.`,
+  );
+}
+
+const PORT = configuredPort === undefined
+  ? (EXTERNAL_BRIDGE ? resolveExternalPort(BRIDGE_PORT) : 9222)
+  : Number(configuredPort);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
   throw new Error(`invalid RAW_BROWSER_PORT "${configuredPort}" (expected 1-65535)`);
 }
@@ -2230,6 +2274,16 @@ async function ensureSession(): Promise<Session> {
   return session;
 }
 
+function describeBridgeProfile(): string {
+  const sessions = readLiveSessions(BRIDGE_BROWSER);
+  const mine = sessions.find((session) => session.port === PORT);
+  const label = mine?.email || mine?.profileId || "account not reported yet";
+  const others = sessions
+    .filter((session) => session.port !== PORT)
+    .map((session) => `${session.email || session.profileId || "unknown"} on ${session.port}`);
+  return others.length ? `${label} on ${PORT}; also ${others.join(", ")}` : `${label} on ${PORT}`;
+}
+
 async function browserStatusLocal(): Promise<string> {
   const alive = await debuggerAlive();
   const owned = alive ? ownsDefaultDebugger(alive) : false;
@@ -2237,7 +2291,7 @@ async function browserStatusLocal(): Promise<string> {
     `debugger: ${alive ? `running on port ${PORT} (${alive.Browser ?? "browser"})` : "not running"}`,
     `attach: ${alive ? (owned ? "will reuse the running browser" : "refused: the running browser is not owned by raw") : "will launch on first use"}`,
     `bridge: ${EXTERNAL_BRIDGE ? `${BRIDGE_BROWSER} extension (${BRIDGE_CONFIG_FILE})` : "off (direct CDP)"}`,
-    `profile: ${EXTERNAL_BRIDGE ? `${BRIDGE_BROWSER} Default profile` : PROFILE}`,
+    `profile: ${EXTERNAL_BRIDGE ? describeBridgeProfile() : PROFILE}`,
     `mode: ${HEADLESS ? "headless" : "headful"}`,
     `binary: ${findBrowser() ?? "not found (set RAW_BROWSER_PATH)"}`,
   ].join("\n");
