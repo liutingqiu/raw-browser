@@ -164,7 +164,9 @@ native messaging 目录，桥接要用 deb/rpm 或 app bundle 安装的浏览器
 { "mode": "edge-extension" }
 ```
 
-或者 `{ "mode": "chrome-extension" }`。`raw status` 会打印当前选的桥、端口和扩展版本。
+或者 `{ "mode": "chrome-extension" }`。多个配置同时连上时，再加上
+`"account": "you@gmail.com"`（用 `raw status` 打印出来的邮箱），`raw` 就只驱动那一个。
+`raw status` 会打印当前选的桥、端口和扩展版本。
 升级后如果桥连不上，重启一次浏览器：它在进程生命周期内缓存了 native messaging 宿主的路径。
 从老版本安装器升上来？先重启浏览器，再带 `--clean-legacy-hosts`（PowerShell 里是
 `-CleanLegacyHosts`）跑一次安装器，清掉旧的 `host-*` 目录。

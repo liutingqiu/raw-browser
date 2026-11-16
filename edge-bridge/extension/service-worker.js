@@ -6,13 +6,50 @@ let nativePort;
 let reconnectTimer;
 let reconnectDelay = 1000;
 let paused = false;
+let identityPromise;
 const bridge = RawEdgeBridgeCore.createBridgeExecutor(chrome);
+
+/** Stable per Chrome profile. chrome.storage.local is not shared across profiles. */
+function profileIdentity() {
+  identityPromise ??= (async () => {
+    const stored = await chrome.storage.local.get({ profileId: "" });
+    let profileId = stored.profileId;
+    if (!profileId) {
+      profileId = crypto.randomUUID();
+      await chrome.storage.local.set({ profileId });
+    }
+    const email = await profileEmail();
+    return { profileId, email };
+  })();
+  return identityPromise;
+}
+
+/** The signed-in address for this profile, used only to label the bridge. */
+async function profileEmail() {
+  const urls = [
+    "https://accounts.google.com/ListAccounts?gpsia=1&source=ogb&json=standard",
+    "https://mail.google.com/mail/u/0/feed/atom",
+  ];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) continue;
+      const text = (await response.text())
+        .replace(/^\)\]\}'\s*/, "")
+        .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+      const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      if (match) return match[0];
+    } catch {
+      /* try the next source */
+    }
+  }
+  return "";
+}
 
 /**
  * Exactly one native port per service worker. A second connectNative call while
- * a port is still open starts a second host process, and every fresh host
- * retires the previous one, so the two ends would kill each other in a loop and
- * the bridge port would flap instead of serving requests.
+ * a port is still open starts a second host for this same profile, and that
+ * host retires the previous one, so the two ends would kill each other.
  */
 function post(message) {
   if (!nativePort) {
@@ -72,12 +109,17 @@ function connect() {
   setTimeout(() => {
     if (nativePort === port) reconnectDelay = 1000;
   }, 5000);
-  post({
-    kind: "hello",
-    extensionId: chrome.runtime.id,
-    version: chrome.runtime.getManifest().version,
-    protocolVersion: "1",
-    userAgent: navigator.userAgent,
+  profileIdentity().then((identity) => {
+    if (nativePort !== port) return;
+    post({
+      kind: "hello",
+      extensionId: chrome.runtime.id,
+      version: chrome.runtime.getManifest().version,
+      protocolVersion: "1",
+      userAgent: navigator.userAgent,
+      profileId: identity.profileId,
+      email: identity.email,
+    });
   });
 }
 
